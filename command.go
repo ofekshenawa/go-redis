@@ -3450,7 +3450,6 @@ func (cmd *CommandsInfoCmd) String() string {
 	return cmdString(cmd, cmd.val)
 }
 
-// TODO: Add redis 8 numArg and add Tips to CommandInfo struct as expected for internal/routing/loader.go
 func (cmd *CommandsInfoCmd) readReply(rd *proto.Reader) error {
 	const numArgRedis5 = 6
 	const numArgRedis6 = 7
