@@ -1778,6 +1778,7 @@ func (c *ClusterClient) cmdsInfo(ctx context.Context) (map[string]*CommandInfo, 
 
 	addrs, err := c.nodes.Addrs()
 	if err != nil {
+		internal.Logger.Printf(context.TODO(), "failed to get node addresses: %s", err)
 		return nil, err
 	}
 
@@ -1790,9 +1791,11 @@ func (c *ClusterClient) cmdsInfo(ctx context.Context) (map[string]*CommandInfo, 
 
 	for _, idx := range perm {
 		addr := addrs[idx]
+		internal.Logger.Printf(context.TODO(), "trying to get command info from node %s", addr)
 
 		node, err := c.nodes.GetOrCreate(addr)
 		if err != nil {
+			internal.Logger.Printf(context.TODO(), "failed to get/create node %s: %s", addr, err)
 			if firstErr == nil {
 				firstErr = err
 			}
@@ -1801,8 +1804,10 @@ func (c *ClusterClient) cmdsInfo(ctx context.Context) (map[string]*CommandInfo, 
 
 		info, err := node.Client.Command(ctx).Result()
 		if err == nil {
+			internal.Logger.Printf(context.TODO(), "successfully got command info from node %s", addr)
 			return info, nil
 		}
+		internal.Logger.Printf(context.TODO(), "failed to get command info from node %s: %s", addr, err)
 		if firstErr == nil {
 			firstErr = err
 		}
