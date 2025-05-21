@@ -19,6 +19,7 @@ import (
 	"github.com/redis/go-redis/v9/internal/pool"
 	"github.com/redis/go-redis/v9/internal/proto"
 	"github.com/redis/go-redis/v9/internal/rand"
+	"github.com/redis/go-redis/v9/internal/routing"
 )
 
 const (
@@ -108,6 +109,10 @@ type ClusterOptions struct {
 
 	// UnstableResp3 enables Unstable mode for Redis Search module with RESP3.
 	UnstableResp3 bool
+
+	// ShardPicker is used to pick a shard when the request_policy is
+	// ReqDefault and the command has no keys.
+	ShardPicker routing.ShardPicker
 }
 
 func (opt *ClusterOptions) init() {
@@ -156,6 +161,10 @@ func (opt *ClusterOptions) init() {
 
 	if opt.NewClient == nil {
 		opt.NewClient = NewClient
+	}
+
+	if opt.ShardPicker == nil {
+		opt.ShardPicker = &routing.RoundRobinPicker{}
 	}
 }
 
@@ -976,11 +985,9 @@ func (c *ClusterClient) Process(ctx context.Context, cmd Cmder) error {
 }
 
 func (c *ClusterClient) process(ctx context.Context, cmd Cmder) error {
-	slot := c.cmdSlot(ctx, cmd)
-	var node *clusterNode
-	var moved bool
-	var ask bool
 	var lastErr error
+	var moved, ask bool
+
 	for attempt := 0; attempt <= c.opt.MaxRedirects; attempt++ {
 		// MOVED and ASK responses are not transient errors that require retry delay; they
 		// should be attempted immediately.
@@ -990,41 +997,20 @@ func (c *ClusterClient) process(ctx context.Context, cmd Cmder) error {
 			}
 		}
 
-		if node == nil {
-			var err error
-			node, err = c.cmdNode(ctx, cmd.Name(), slot)
-			if err != nil {
-				return err
-			}
-		}
-
-		if ask {
-			ask = false
-
-			pipe := node.Client.Pipeline()
-			_ = pipe.Process(ctx, NewCmd(ctx, "asking"))
-			_ = pipe.Process(ctx, cmd)
-			_, lastErr = pipe.Exec(ctx)
-		} else {
-			lastErr = node.Client.Process(ctx, cmd)
-		}
-
-		// If there is no error - we are done.
+		lastErr = c.routeAndRun(ctx, cmd)
 		if lastErr == nil {
 			return nil
 		}
+
 		if isReadOnly := isReadOnlyError(lastErr); isReadOnly || lastErr == pool.ErrClosed {
 			if isReadOnly {
 				c.state.LazyReload()
 			}
-			node = nil
 			continue
 		}
 
-		// If slave is loading - pick another node.
 		if c.opt.ReadOnly && isLoadingError(lastErr) {
-			node.MarkAsFailing()
-			node = nil
+			c.state.LazyReload()
 			continue
 		}
 
@@ -1032,25 +1018,14 @@ func (c *ClusterClient) process(ctx context.Context, cmd Cmder) error {
 		moved, ask, addr = isMovedError(lastErr)
 		if moved || ask {
 			c.state.LazyReload()
-
-			var err error
-			node, err = c.nodes.GetOrCreate(addr)
-			if err != nil {
+			if _, err := c.nodes.GetOrCreate(addr); err != nil {
 				return err
 			}
 			continue
 		}
 
 		if shouldRetry(lastErr, cmd.readTimeout() == nil) {
-			// First retry the same node.
-			if attempt == 0 {
-				continue
-			}
-
-			// Second try another node.
-			node.MarkAsFailing()
-			node = nil
-			continue
+			continue // Add retry delay in next loop iteration
 		}
 
 		return lastErr
