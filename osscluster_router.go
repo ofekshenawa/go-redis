@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: BSD-2-Clause
 package redis
 
 import (
@@ -11,12 +10,16 @@ import (
 
 // routeAndRun routes the command based on its COMMAND tips policy.
 func (c *ClusterClient) routeAndRun(ctx context.Context, cmd Cmder) error {
-	var pol routing.CommandPolicy
+	var pol *routing.CommandPolicy
 	c.hooksMu.RLock()
 	if p := c.cmdInfo(ctx, cmd.Name()).Tips; p != nil {
-		pol = *p
+		pol = p
 	}
 	c.hooksMu.RUnlock()
+
+	if pol == nil {
+		pol = &routing.CommandPolicy{}
+	}
 
 	switch pol.Request {
 	case routing.ReqAllNodes:
