@@ -985,9 +985,11 @@ func (c *ClusterClient) Process(ctx context.Context, cmd Cmder) error {
 }
 
 func (c *ClusterClient) process(ctx context.Context, cmd Cmder) error {
+	slot := c.cmdSlot(ctx, cmd)
+	var node *clusterNode
+	var moved bool
+	var ask bool
 	var lastErr error
-	var moved, ask bool
-
 	for attempt := 0; attempt <= c.opt.MaxRedirects; attempt++ {
 		// MOVED and ASK responses are not transient errors that require retry delay; they
 		// should be attempted immediately.
@@ -997,20 +999,41 @@ func (c *ClusterClient) process(ctx context.Context, cmd Cmder) error {
 			}
 		}
 
-		lastErr = c.routeAndRun(ctx, cmd)
+		if node == nil {
+			var err error
+			node, err = c.cmdNode(ctx, cmd.Name(), slot)
+			if err != nil {
+				return err
+			}
+		}
+
+		if ask {
+			ask = false
+
+			pipe := node.Client.Pipeline()
+			_ = pipe.Process(ctx, NewCmd(ctx, "asking"))
+			_ = pipe.Process(ctx, cmd)
+			_, lastErr = pipe.Exec(ctx)
+		} else {
+			lastErr = c.routeAndRun(ctx, cmd)
+		}
+
+		// If there is no error - we are done.
 		if lastErr == nil {
 			return nil
 		}
-
 		if isReadOnly := isReadOnlyError(lastErr); isReadOnly || lastErr == pool.ErrClosed {
 			if isReadOnly {
 				c.state.LazyReload()
 			}
+			node = nil
 			continue
 		}
 
+		// If slave is loading - pick another node.
 		if c.opt.ReadOnly && isLoadingError(lastErr) {
-			c.state.LazyReload()
+			node.MarkAsFailing()
+			node = nil
 			continue
 		}
 
@@ -1018,14 +1041,25 @@ func (c *ClusterClient) process(ctx context.Context, cmd Cmder) error {
 		moved, ask, addr = isMovedError(lastErr)
 		if moved || ask {
 			c.state.LazyReload()
-			if _, err := c.nodes.GetOrCreate(addr); err != nil {
+
+			var err error
+			node, err = c.nodes.GetOrCreate(addr)
+			if err != nil {
 				return err
 			}
 			continue
 		}
 
 		if shouldRetry(lastErr, cmd.readTimeout() == nil) {
-			continue // Add retry delay in next loop iteration
+			// First retry the same node.
+			if attempt == 0 {
+				continue
+			}
+
+			// Second try another node.
+			node.MarkAsFailing()
+			node = nil
+			continue
 		}
 
 		return lastErr
@@ -1778,11 +1812,8 @@ func (c *ClusterClient) cmdsInfo(ctx context.Context) (map[string]*CommandInfo, 
 
 	addrs, err := c.nodes.Addrs()
 	if err != nil {
-		internal.Logger.Printf(context.TODO(), "failed to get node addresses: %s", err)
 		return nil, err
 	}
-
-	internal.Logger.Printf(context.TODO(), "available node addresses: %v", addrs)
 
 	var firstErr error
 
@@ -1793,53 +1824,17 @@ func (c *ClusterClient) cmdsInfo(ctx context.Context) (map[string]*CommandInfo, 
 
 	for _, idx := range perm {
 		addr := addrs[idx]
-		internal.Logger.Printf(context.TODO(), "trying to get command info from node %s", addr)
-
 		node, err := c.nodes.GetOrCreate(addr)
 		if err != nil {
-			internal.Logger.Printf(context.TODO(), "failed to get/create node %s: %s", addr, err)
 			if firstErr == nil {
 				firstErr = err
 			}
 			continue
 		}
 
-		// Try a simple PING first to check connectivity
-		pingErr := node.Client.Ping(ctx).Err()
-		if pingErr != nil {
-			internal.Logger.Printf(context.TODO(), "PING to node %s failed: %s", addr, pingErr)
-		} else {
-			internal.Logger.Printf(context.TODO(), "PING to node %s succeeded", addr)
-		}
-
-		// Try to get client list to check if we can execute commands
-		clientList, clientListErr := node.Client.ClientList(ctx).Result()
-		if clientListErr != nil {
-			internal.Logger.Printf(context.TODO(), "CLIENT LIST on node %s failed: %s", addr, clientListErr)
-		} else {
-			internal.Logger.Printf(context.TODO(), "CLIENT LIST on node %s succeeded, found %d clients", addr, len(strings.Split(clientList, "\n")))
-		}
-
 		info, err := node.Client.Command(ctx).Result()
 		if err == nil {
-			internal.Logger.Printf(context.TODO(), "successfully got command info from node %s", addr)
 			return info, nil
-		}
-		internal.Logger.Printf(context.TODO(), "failed to get command info from node %s: %s", addr, err)
-
-		// Try to get more details about the error
-		infoCmd := node.Client.Info(ctx, "server")
-		if infoCmd.Err() != nil {
-			internal.Logger.Printf(context.TODO(), "INFO server on node %s failed: %s", addr, infoCmd.Err())
-		} else {
-			redisVersion := "unknown"
-			for _, line := range strings.Split(infoCmd.Val(), "\n") {
-				if strings.HasPrefix(line, "redis_version:") {
-					redisVersion = strings.TrimPrefix(line, "redis_version:")
-					break
-				}
-			}
-			internal.Logger.Printf(context.TODO(), "Redis version on node %s: %s", addr, redisVersion)
 		}
 
 		if firstErr == nil {

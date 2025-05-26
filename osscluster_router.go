@@ -10,16 +10,23 @@ import (
 
 // routeAndRun routes the command based on its COMMAND tips policy.
 func (c *ClusterClient) routeAndRun(ctx context.Context, cmd Cmder) error {
+	state, err := c.state.ReloadOrGet(ctx)
+	if err != nil {
+		return err
+	}
+
+	if len(state.Masters) == 0 {
+		return errClusterNoNodes
+	}
+
 	var pol *routing.CommandPolicy
 	c.hooksMu.RLock()
 	if p := c.cmdInfo(ctx, cmd.Name()).Tips; p != nil {
 		pol = p
-	}
-	c.hooksMu.RUnlock()
-
-	if pol == nil {
+	} else {
 		pol = &routing.CommandPolicy{}
 	}
+	c.hooksMu.RUnlock()
 
 	switch pol.Request {
 	case routing.ReqAllNodes:
@@ -39,7 +46,7 @@ func (c *ClusterClient) routeAndRun(ctx context.Context, cmd Cmder) error {
 		return c.processSpecial(ctx, cmd)
 
 	case routing.ReqDefault:
-		if cmd.firstKeyPos() == 0 {
+		if cmdFirstKeyPos(cmd) == 0 {
 			// key-less default → pick arbitrary shard
 			n := c.pickArbitraryShard(ctx)
 			return c.processOnConn(ctx, n.Client, cmd)
@@ -49,7 +56,7 @@ func (c *ClusterClient) routeAndRun(ctx context.Context, cmd Cmder) error {
 
 	default:
 		// unknown → treat as default
-		if cmd.firstKeyPos() == 0 {
+		if cmdFirstKeyPos(cmd) == 0 {
 			n := c.pickArbitraryShard(ctx)
 			return c.processOnConn(ctx, n.Client, cmd)
 		}
@@ -71,7 +78,7 @@ func (c *ClusterClient) pickArbitraryShard(ctx context.Context) *clusterNode {
 // processMultiShard splits a multi-shard command by slot and routes each sub-command accordingly.
 func (c *ClusterClient) processMultiShard(ctx context.Context, cmd Cmder) error {
 	args := cmd.Args()
-	first := int(cmd.firstKeyPos())
+	first := int(cmdFirstKeyPos(cmd))
 	if first == 0 || first >= len(args) {
 		return fmt.Errorf("redis: multi-shard command %s has no key arguments", cmd.Name())
 	}
@@ -111,7 +118,7 @@ func (c *ClusterClient) processMultiShard(ctx context.Context, cmd Cmder) error 
 // processSpecial handles commands with special routing requirements.
 func (c *ClusterClient) processSpecial(ctx context.Context, cmd Cmder) error {
 	// Default stub: route based on first key if present, else arbitrary shard
-	if cmd.firstKeyPos() > 0 {
+	if cmdFirstKeyPos(cmd) > 0 {
 		return c.processSlotBased(ctx, cmd)
 	}
 	node := c.pickArbitraryShard(ctx)
