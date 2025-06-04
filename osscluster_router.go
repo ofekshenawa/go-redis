@@ -44,24 +44,15 @@ func (c *ClusterClient) routeAndRun(ctx context.Context, cmd Cmder) error {
 
 	case routing.ReqSpecial:
 		return c.processSpecial(ctx, cmd)
-
-	case routing.ReqDefault:
-		if cmdFirstKeyPos(cmd) == 0 {
-			// key-less default → pick arbitrary shard
-			n := c.pickArbitraryShard(ctx)
-			return c.processOnConn(ctx, n.Client, cmd)
-		}
-		// keyed default → hash-slot based
-		return c.processSlotBased(ctx, cmd)
-
-	default:
-		// unknown → treat as default
-		if cmdFirstKeyPos(cmd) == 0 {
-			n := c.pickArbitraryShard(ctx)
-			return c.processOnConn(ctx, n.Client, cmd)
-		}
-		return c.processSlotBased(ctx, cmd)
 	}
+	// default case (i.e. ReqDefault or unknown)
+	if cmdFirstKeyPos(cmd) == 0 {
+		// key-less default → pick arbitrary shard
+		n := c.pickArbitraryShard(ctx)
+		return c.processOnConn(ctx, n.Client, cmd)
+	}
+	// keyed default → hash-slot based
+	return c.processSlotBased(ctx, cmd)
 }
 
 // pickArbitraryShard chooses a master shard based on the configured ShardPicker.
