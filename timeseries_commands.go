@@ -533,6 +533,13 @@ func (cmd *TSTimestampValueCmd) readReply(rd *proto.Reader) (err error) {
 	return nil
 }
 
+func (cmd *TSTimestampValueCmd) Clone() Cmder {
+	return &TSTimestampValueCmd{
+		baseCmd: cmd.cloneBaseCmd(),
+		val:     cmd.val, // TSTimestampValue is a simple struct, can be copied directly
+	}
+}
+
 // TSInfo - Returns information about a time-series key.
 // For more information - https://redis.io/commands/ts.info/
 func (c cmdable) TSInfo(ctx context.Context, key string) *MapStringInterfaceCmd {
@@ -750,6 +757,18 @@ func (cmd *TSTimestampValueSliceCmd) readReply(rd *proto.Reader) (err error) {
 	}
 
 	return nil
+}
+
+func (cmd *TSTimestampValueSliceCmd) Clone() Cmder {
+	var val []TSTimestampValue
+	if cmd.val != nil {
+		val = make([]TSTimestampValue, len(cmd.val))
+		copy(val, cmd.val)
+	}
+	return &TSTimestampValueSliceCmd{
+		baseCmd: cmd.cloneBaseCmd(),
+		val:     val,
+	}
 }
 
 // TSMRange - Returns a range of samples from multiple time-series keys.

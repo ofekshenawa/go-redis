@@ -10,6 +10,7 @@ import (
 
 // routeAndRun routes the command based on its COMMAND tips policy.
 func (c *ClusterClient) routeAndRun(ctx context.Context, cmd Cmder) error {
+	var firstErr error
 	state, err := c.state.ReloadOrGet(ctx)
 	if err != nil {
 		return err
@@ -20,31 +21,60 @@ func (c *ClusterClient) routeAndRun(ctx context.Context, cmd Cmder) error {
 	}
 
 	var pol *routing.CommandPolicy
-	c.hooksMu.RLock()
-	if p := c.cmdInfo(ctx, cmd.Name()).Tips; p != nil {
-		pol = p
+	if cmd != nil {
+		c.hooksMu.RLock()
+		if p := c.cmdInfo(ctx, cmd.Name()).Tips; p != nil {
+			pol = p
+		} else {
+			pol = &routing.CommandPolicy{}
+		}
+		c.hooksMu.RUnlock()
 	} else {
 		pol = &routing.CommandPolicy{}
 	}
-	c.hooksMu.RUnlock()
-
+	executed := false
+	cmds := []Cmder{}
 	switch pol.Request {
 	case routing.ReqAllNodes:
-		return c.ForEachShard(ctx, func(ctx context.Context, shard *Client) error {
-			return shard.Process(ctx, cmd)
+		executed = true
+		firstErr = c.ForEachShard(ctx, func(ctx context.Context, shard *Client) error {
+			cmdPerShard := cmd.Clone()
+			cmds = append(cmds, cmdPerShard)
+			return shard.Process(ctx, cmdPerShard)
 		})
 
 	case routing.ReqAllShards:
-		return c.ForEachMaster(ctx, func(ctx context.Context, master *Client) error {
-			return master.Process(ctx, cmd)
+		executed = true
+		firstErr = c.ForEachMaster(ctx, func(ctx context.Context, master *Client) error {
+			cmdPerShard := cmd.Clone()
+			cmds = append(cmds, cmdPerShard)
+			return master.Process(ctx, cmdPerShard)
 		})
 
 	case routing.ReqMultiShard:
-		return c.processMultiShard(ctx, cmd)
+		executed = true
+		firstErr = c.processMultiShard(ctx, cmd)
 
 	case routing.ReqSpecial:
-		return c.processSpecial(ctx, cmd)
+		executed = true
+		firstErr = c.processSpecial(ctx, cmd)
 	}
+	// TODO(ndyakov): fix this, this is not correct and it is added just for inspiration
+	if firstErr != nil {
+		cmd.SetErr(firstErr)
+		return firstErr
+	} else if len(cmds) > 0 {
+		err := cmdsFirstErr(cmds)
+		if err != nil {
+			cmd.SetErr(err)
+			return err
+		}
+		return nil
+	}
+	if executed {
+		return nil
+	}
+
 	// default case (i.e. ReqDefault or unknown)
 	if cmdFirstKeyPos(cmd) == 0 {
 		// key-less default → pick arbitrary shard

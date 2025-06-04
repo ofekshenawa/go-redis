@@ -149,6 +149,14 @@ func (cmd *JSONCmd) readReply(rd *proto.Reader) error {
 	return nil
 }
 
+func (cmd *JSONCmd) Clone() Cmder {
+	return &JSONCmd{
+		baseCmd:  cmd.cloneBaseCmd(),
+		val:      cmd.val,
+		expanded: cmd.expanded, // interface{} can be shared as it should be immutable after parsing
+	}
+}
+
 // -------------------------------------------
 
 type JSONSliceCmd struct {
@@ -217,6 +225,18 @@ func (cmd *JSONSliceCmd) readReply(rd *proto.Reader) error {
 	return nil
 }
 
+func (cmd *JSONSliceCmd) Clone() Cmder {
+	var val []interface{}
+	if cmd.val != nil {
+		val = make([]interface{}, len(cmd.val))
+		copy(val, cmd.val)
+	}
+	return &JSONSliceCmd{
+		baseCmd: cmd.cloneBaseCmd(),
+		val:     val,
+	}
+}
+
 /*******************************************************************************
 *
 * IntPointerSliceCmd
@@ -272,6 +292,23 @@ func (cmd *IntPointerSliceCmd) readReply(rd *proto.Reader) error {
 	}
 
 	return nil
+}
+
+func (cmd *IntPointerSliceCmd) Clone() Cmder {
+	var val []*int64
+	if cmd.val != nil {
+		val = make([]*int64, len(cmd.val))
+		for i, ptr := range cmd.val {
+			if ptr != nil {
+				newVal := *ptr
+				val[i] = &newVal
+			}
+		}
+	}
+	return &IntPointerSliceCmd{
+		baseCmd: cmd.cloneBaseCmd(),
+		val:     val,
+	}
 }
 
 //------------------------------------------------------------------------------

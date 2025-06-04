@@ -35,6 +35,9 @@ type Cmder interface {
 	// e.g. "set k v ex 10" -> "set k v ex 10: OK", "get k" -> "get k: v".
 	String() string
 
+	// Clone creates a copy of the command.
+	Clone() Cmder
+
 	stringArg(int) string
 	firstKeyPos() int8
 	SetFirstKeyPos(int8)
@@ -203,6 +206,27 @@ func (cmd *baseCmd) setReadTimeout(d time.Duration) {
 func (cmd *baseCmd) readRawReply(rd *proto.Reader) (err error) {
 	cmd.rawVal, err = rd.ReadReply()
 	return err
+}
+
+func (cmd *baseCmd) cloneBaseCmd() baseCmd {
+	var readTimeout *time.Duration
+	if cmd._readTimeout != nil {
+		timeout := *cmd._readTimeout
+		readTimeout = &timeout
+	}
+
+	// Create a copy of args slice
+	args := make([]interface{}, len(cmd.args))
+	copy(args, cmd.args)
+
+	return baseCmd{
+		ctx:          cmd.ctx,
+		args:         args,
+		err:          cmd.err,
+		keyPos:       cmd.keyPos,
+		rawVal:       cmd.rawVal,
+		_readTimeout: readTimeout,
+	}
 }
 
 //------------------------------------------------------------------------------
@@ -490,6 +514,13 @@ func (cmd *Cmd) readReply(rd *proto.Reader) (err error) {
 	return err
 }
 
+func (cmd *Cmd) Clone() Cmder {
+	return &Cmd{
+		baseCmd: cmd.cloneBaseCmd(),
+		val:     cmd.val,
+	}
+}
+
 //------------------------------------------------------------------------------
 
 type SliceCmd struct {
@@ -550,6 +581,18 @@ func (cmd *SliceCmd) readReply(rd *proto.Reader) (err error) {
 	return err
 }
 
+func (cmd *SliceCmd) Clone() Cmder {
+	var val []interface{}
+	if cmd.val != nil {
+		val = make([]interface{}, len(cmd.val))
+		copy(val, cmd.val)
+	}
+	return &SliceCmd{
+		baseCmd: cmd.cloneBaseCmd(),
+		val:     val,
+	}
+}
+
 //------------------------------------------------------------------------------
 
 type StatusCmd struct {
@@ -594,6 +637,13 @@ func (cmd *StatusCmd) readReply(rd *proto.Reader) (err error) {
 	return err
 }
 
+func (cmd *StatusCmd) Clone() Cmder {
+	return &StatusCmd{
+		baseCmd: cmd.cloneBaseCmd(),
+		val:     cmd.val,
+	}
+}
+
 //------------------------------------------------------------------------------
 
 type IntCmd struct {
@@ -636,6 +686,13 @@ func (cmd *IntCmd) String() string {
 func (cmd *IntCmd) readReply(rd *proto.Reader) (err error) {
 	cmd.val, err = rd.ReadInt()
 	return err
+}
+
+func (cmd *IntCmd) Clone() Cmder {
+	return &IntCmd{
+		baseCmd: cmd.cloneBaseCmd(),
+		val:     cmd.val,
+	}
 }
 
 //------------------------------------------------------------------------------
@@ -685,6 +742,18 @@ func (cmd *IntSliceCmd) readReply(rd *proto.Reader) error {
 		}
 	}
 	return nil
+}
+
+func (cmd *IntSliceCmd) Clone() Cmder {
+	var val []int64
+	if cmd.val != nil {
+		val = make([]int64, len(cmd.val))
+		copy(val, cmd.val)
+	}
+	return &IntSliceCmd{
+		baseCmd: cmd.cloneBaseCmd(),
+		val:     val,
+	}
 }
 
 //------------------------------------------------------------------------------
@@ -740,6 +809,14 @@ func (cmd *DurationCmd) readReply(rd *proto.Reader) error {
 	return nil
 }
 
+func (cmd *DurationCmd) Clone() Cmder {
+	return &DurationCmd{
+		baseCmd:   cmd.cloneBaseCmd(),
+		val:       cmd.val,
+		precision: cmd.precision,
+	}
+}
+
 //------------------------------------------------------------------------------
 
 type TimeCmd struct {
@@ -791,6 +868,13 @@ func (cmd *TimeCmd) readReply(rd *proto.Reader) error {
 	return nil
 }
 
+func (cmd *TimeCmd) Clone() Cmder {
+	return &TimeCmd{
+		baseCmd: cmd.cloneBaseCmd(),
+		val:     cmd.val,
+	}
+}
+
 //------------------------------------------------------------------------------
 
 type BoolCmd struct {
@@ -836,6 +920,13 @@ func (cmd *BoolCmd) readReply(rd *proto.Reader) (err error) {
 		err = nil
 	}
 	return err
+}
+
+func (cmd *BoolCmd) Clone() Cmder {
+	return &BoolCmd{
+		baseCmd: cmd.cloneBaseCmd(),
+		val:     cmd.val,
+	}
 }
 
 //------------------------------------------------------------------------------
@@ -942,6 +1033,13 @@ func (cmd *StringCmd) readReply(rd *proto.Reader) (err error) {
 	return err
 }
 
+func (cmd *StringCmd) Clone() Cmder {
+	return &StringCmd{
+		baseCmd: cmd.cloneBaseCmd(),
+		val:     cmd.val,
+	}
+}
+
 //------------------------------------------------------------------------------
 
 type FloatCmd struct {
@@ -980,6 +1078,13 @@ func (cmd *FloatCmd) String() string {
 func (cmd *FloatCmd) readReply(rd *proto.Reader) (err error) {
 	cmd.val, err = rd.ReadFloat()
 	return err
+}
+
+func (cmd *FloatCmd) Clone() Cmder {
+	return &FloatCmd{
+		baseCmd: cmd.cloneBaseCmd(),
+		val:     cmd.val,
+	}
 }
 
 //------------------------------------------------------------------------------
@@ -1035,6 +1140,18 @@ func (cmd *FloatSliceCmd) readReply(rd *proto.Reader) error {
 		}
 	}
 	return nil
+}
+
+func (cmd *FloatSliceCmd) Clone() Cmder {
+	var val []float64
+	if cmd.val != nil {
+		val = make([]float64, len(cmd.val))
+		copy(val, cmd.val)
+	}
+	return &FloatSliceCmd{
+		baseCmd: cmd.cloneBaseCmd(),
+		val:     val,
+	}
 }
 
 //------------------------------------------------------------------------------
@@ -1093,6 +1210,18 @@ func (cmd *StringSliceCmd) readReply(rd *proto.Reader) error {
 		}
 	}
 	return nil
+}
+
+func (cmd *StringSliceCmd) Clone() Cmder {
+	var val []string
+	if cmd.val != nil {
+		val = make([]string, len(cmd.val))
+		copy(val, cmd.val)
+	}
+	return &StringSliceCmd{
+		baseCmd: cmd.cloneBaseCmd(),
+		val:     val,
+	}
 }
 
 //------------------------------------------------------------------------------
@@ -1189,6 +1318,18 @@ func (cmd *KeyValueSliceCmd) readReply(rd *proto.Reader) error { // nolint:dupl
 	return nil
 }
 
+func (cmd *KeyValueSliceCmd) Clone() Cmder {
+	var val []KeyValue
+	if cmd.val != nil {
+		val = make([]KeyValue, len(cmd.val))
+		copy(val, cmd.val)
+	}
+	return &KeyValueSliceCmd{
+		baseCmd: cmd.cloneBaseCmd(),
+		val:     val,
+	}
+}
+
 //------------------------------------------------------------------------------
 
 type BoolSliceCmd struct {
@@ -1236,6 +1377,18 @@ func (cmd *BoolSliceCmd) readReply(rd *proto.Reader) error {
 		}
 	}
 	return nil
+}
+
+func (cmd *BoolSliceCmd) Clone() Cmder {
+	var val []bool
+	if cmd.val != nil {
+		val = make([]bool, len(cmd.val))
+		copy(val, cmd.val)
+	}
+	return &BoolSliceCmd{
+		baseCmd: cmd.cloneBaseCmd(),
+		val:     val,
+	}
 }
 
 //------------------------------------------------------------------------------
@@ -1317,6 +1470,20 @@ func (cmd *MapStringStringCmd) readReply(rd *proto.Reader) error {
 	return nil
 }
 
+func (cmd *MapStringStringCmd) Clone() Cmder {
+	var val map[string]string
+	if cmd.val != nil {
+		val = make(map[string]string, len(cmd.val))
+		for k, v := range cmd.val {
+			val[k] = v
+		}
+	}
+	return &MapStringStringCmd{
+		baseCmd: cmd.cloneBaseCmd(),
+		val:     val,
+	}
+}
+
 //------------------------------------------------------------------------------
 
 type MapStringIntCmd struct {
@@ -1372,6 +1539,20 @@ func (cmd *MapStringIntCmd) readReply(rd *proto.Reader) error {
 		cmd.val[key] = nn
 	}
 	return nil
+}
+
+func (cmd *MapStringIntCmd) Clone() Cmder {
+	var val map[string]int64
+	if cmd.val != nil {
+		val = make(map[string]int64, len(cmd.val))
+		for k, v := range cmd.val {
+			val[k] = v
+		}
+	}
+	return &MapStringIntCmd{
+		baseCmd: cmd.cloneBaseCmd(),
+		val:     val,
+	}
 }
 
 // ------------------------------------------------------------------------------
@@ -1469,6 +1650,24 @@ func (cmd *MapStringSliceInterfaceCmd) readReply(rd *proto.Reader) (err error) {
 	return nil
 }
 
+func (cmd *MapStringSliceInterfaceCmd) Clone() Cmder {
+	var val map[string][]interface{}
+	if cmd.val != nil {
+		val = make(map[string][]interface{}, len(cmd.val))
+		for k, v := range cmd.val {
+			if v != nil {
+				newSlice := make([]interface{}, len(v))
+				copy(newSlice, v)
+				val[k] = newSlice
+			}
+		}
+	}
+	return &MapStringSliceInterfaceCmd{
+		baseCmd: cmd.cloneBaseCmd(),
+		val:     val,
+	}
+}
+
 //------------------------------------------------------------------------------
 
 type StringStructMapCmd struct {
@@ -1521,6 +1720,20 @@ func (cmd *StringStructMapCmd) readReply(rd *proto.Reader) error {
 	return nil
 }
 
+func (cmd *StringStructMapCmd) Clone() Cmder {
+	var val map[string]struct{}
+	if cmd.val != nil {
+		val = make(map[string]struct{}, len(cmd.val))
+		for k := range cmd.val {
+			val[k] = struct{}{}
+		}
+	}
+	return &StringStructMapCmd{
+		baseCmd: cmd.cloneBaseCmd(),
+		val:     val,
+	}
+}
+
 //------------------------------------------------------------------------------
 
 type XMessage struct {
@@ -1564,6 +1777,28 @@ func (cmd *XMessageSliceCmd) String() string {
 func (cmd *XMessageSliceCmd) readReply(rd *proto.Reader) (err error) {
 	cmd.val, err = readXMessageSlice(rd)
 	return err
+}
+
+func (cmd *XMessageSliceCmd) Clone() Cmder {
+	var val []XMessage
+	if cmd.val != nil {
+		val = make([]XMessage, len(cmd.val))
+		for i, msg := range cmd.val {
+			val[i] = XMessage{
+				ID: msg.ID,
+			}
+			if msg.Values != nil {
+				val[i].Values = make(map[string]interface{}, len(msg.Values))
+				for k, v := range msg.Values {
+					val[i].Values[k] = v
+				}
+			}
+		}
+	}
+	return &XMessageSliceCmd{
+		baseCmd: cmd.cloneBaseCmd(),
+		val:     val,
+	}
 }
 
 func readXMessageSlice(rd *proto.Reader) ([]XMessage, error) {
@@ -1699,6 +1934,36 @@ func (cmd *XStreamSliceCmd) readReply(rd *proto.Reader) error {
 	return nil
 }
 
+func (cmd *XStreamSliceCmd) Clone() Cmder {
+	var val []XStream
+	if cmd.val != nil {
+		val = make([]XStream, len(cmd.val))
+		for i, stream := range cmd.val {
+			val[i] = XStream{
+				Stream: stream.Stream,
+			}
+			if stream.Messages != nil {
+				val[i].Messages = make([]XMessage, len(stream.Messages))
+				for j, msg := range stream.Messages {
+					val[i].Messages[j] = XMessage{
+						ID: msg.ID,
+					}
+					if msg.Values != nil {
+						val[i].Messages[j].Values = make(map[string]interface{}, len(msg.Values))
+						for k, v := range msg.Values {
+							val[i].Messages[j].Values[k] = v
+						}
+					}
+				}
+			}
+		}
+	}
+	return &XStreamSliceCmd{
+		baseCmd: cmd.cloneBaseCmd(),
+		val:     val,
+	}
+}
+
 //------------------------------------------------------------------------------
 
 type XPending struct {
@@ -1782,6 +2047,27 @@ func (cmd *XPendingCmd) readReply(rd *proto.Reader) error {
 	return nil
 }
 
+func (cmd *XPendingCmd) Clone() Cmder {
+	var val *XPending
+	if cmd.val != nil {
+		val = &XPending{
+			Count:  cmd.val.Count,
+			Lower:  cmd.val.Lower,
+			Higher: cmd.val.Higher,
+		}
+		if cmd.val.Consumers != nil {
+			val.Consumers = make(map[string]int64, len(cmd.val.Consumers))
+			for k, v := range cmd.val.Consumers {
+				val.Consumers[k] = v
+			}
+		}
+	}
+	return &XPendingCmd{
+		baseCmd: cmd.cloneBaseCmd(),
+		val:     val,
+	}
+}
+
 //------------------------------------------------------------------------------
 
 type XPendingExt struct {
@@ -1857,6 +2143,18 @@ func (cmd *XPendingExtCmd) readReply(rd *proto.Reader) error {
 	return nil
 }
 
+func (cmd *XPendingExtCmd) Clone() Cmder {
+	var val []XPendingExt
+	if cmd.val != nil {
+		val = make([]XPendingExt, len(cmd.val))
+		copy(val, cmd.val)
+	}
+	return &XPendingExtCmd{
+		baseCmd: cmd.cloneBaseCmd(),
+		val:     val,
+	}
+}
+
 //------------------------------------------------------------------------------
 
 type XAutoClaimCmd struct {
@@ -1925,6 +2223,29 @@ func (cmd *XAutoClaimCmd) readReply(rd *proto.Reader) error {
 	}
 
 	return nil
+}
+
+func (cmd *XAutoClaimCmd) Clone() Cmder {
+	var val []XMessage
+	if cmd.val != nil {
+		val = make([]XMessage, len(cmd.val))
+		for i, msg := range cmd.val {
+			val[i] = XMessage{
+				ID: msg.ID,
+			}
+			if msg.Values != nil {
+				val[i].Values = make(map[string]interface{}, len(msg.Values))
+				for k, v := range msg.Values {
+					val[i].Values[k] = v
+				}
+			}
+		}
+	}
+	return &XAutoClaimCmd{
+		baseCmd: cmd.cloneBaseCmd(),
+		start:   cmd.start,
+		val:     val,
+	}
 }
 
 //------------------------------------------------------------------------------
@@ -2003,6 +2324,19 @@ func (cmd *XAutoClaimJustIDCmd) readReply(rd *proto.Reader) error {
 	}
 
 	return nil
+}
+
+func (cmd *XAutoClaimJustIDCmd) Clone() Cmder {
+	var val []string
+	if cmd.val != nil {
+		val = make([]string, len(cmd.val))
+		copy(val, cmd.val)
+	}
+	return &XAutoClaimJustIDCmd{
+		baseCmd: cmd.cloneBaseCmd(),
+		start:   cmd.start,
+		val:     val,
+	}
 }
 
 //------------------------------------------------------------------------------
@@ -2089,6 +2423,18 @@ func (cmd *XInfoConsumersCmd) readReply(rd *proto.Reader) error {
 	}
 
 	return nil
+}
+
+func (cmd *XInfoConsumersCmd) Clone() Cmder {
+	var val []XInfoConsumer
+	if cmd.val != nil {
+		val = make([]XInfoConsumer, len(cmd.val))
+		copy(val, cmd.val)
+	}
+	return &XInfoConsumersCmd{
+		baseCmd: cmd.cloneBaseCmd(),
+		val:     val,
+	}
 }
 
 //------------------------------------------------------------------------------
@@ -2197,6 +2543,18 @@ func (cmd *XInfoGroupsCmd) readReply(rd *proto.Reader) error {
 	}
 
 	return nil
+}
+
+func (cmd *XInfoGroupsCmd) Clone() Cmder {
+	var val []XInfoGroup
+	if cmd.val != nil {
+		val = make([]XInfoGroup, len(cmd.val))
+		copy(val, cmd.val)
+	}
+	return &XInfoGroupsCmd{
+		baseCmd: cmd.cloneBaseCmd(),
+		val:     val,
+	}
 }
 
 //------------------------------------------------------------------------------
@@ -2314,6 +2672,45 @@ func (cmd *XInfoStreamCmd) readReply(rd *proto.Reader) error {
 		}
 	}
 	return nil
+}
+
+func (cmd *XInfoStreamCmd) Clone() Cmder {
+	var val *XInfoStream
+	if cmd.val != nil {
+		val = &XInfoStream{
+			Length:               cmd.val.Length,
+			RadixTreeKeys:        cmd.val.RadixTreeKeys,
+			RadixTreeNodes:       cmd.val.RadixTreeNodes,
+			Groups:               cmd.val.Groups,
+			LastGeneratedID:      cmd.val.LastGeneratedID,
+			MaxDeletedEntryID:    cmd.val.MaxDeletedEntryID,
+			EntriesAdded:         cmd.val.EntriesAdded,
+			RecordedFirstEntryID: cmd.val.RecordedFirstEntryID,
+		}
+		// Clone XMessage fields
+		val.FirstEntry = XMessage{
+			ID: cmd.val.FirstEntry.ID,
+		}
+		if cmd.val.FirstEntry.Values != nil {
+			val.FirstEntry.Values = make(map[string]interface{}, len(cmd.val.FirstEntry.Values))
+			for k, v := range cmd.val.FirstEntry.Values {
+				val.FirstEntry.Values[k] = v
+			}
+		}
+		val.LastEntry = XMessage{
+			ID: cmd.val.LastEntry.ID,
+		}
+		if cmd.val.LastEntry.Values != nil {
+			val.LastEntry.Values = make(map[string]interface{}, len(cmd.val.LastEntry.Values))
+			for k, v := range cmd.val.LastEntry.Values {
+				val.LastEntry.Values[k] = v
+			}
+		}
+	}
+	return &XInfoStreamCmd{
+		baseCmd: cmd.cloneBaseCmd(),
+		val:     val,
+	}
 }
 
 //------------------------------------------------------------------------------
@@ -2657,6 +3054,45 @@ func readXInfoStreamConsumers(rd *proto.Reader) ([]XInfoStreamConsumer, error) {
 	return consumers, nil
 }
 
+func (cmd *XInfoStreamFullCmd) Clone() Cmder {
+	var val *XInfoStreamFull
+	if cmd.val != nil {
+		val = &XInfoStreamFull{
+			Length:               cmd.val.Length,
+			RadixTreeKeys:        cmd.val.RadixTreeKeys,
+			RadixTreeNodes:       cmd.val.RadixTreeNodes,
+			LastGeneratedID:      cmd.val.LastGeneratedID,
+			MaxDeletedEntryID:    cmd.val.MaxDeletedEntryID,
+			EntriesAdded:         cmd.val.EntriesAdded,
+			RecordedFirstEntryID: cmd.val.RecordedFirstEntryID,
+		}
+		// Clone Entries
+		if cmd.val.Entries != nil {
+			val.Entries = make([]XMessage, len(cmd.val.Entries))
+			for i, msg := range cmd.val.Entries {
+				val.Entries[i] = XMessage{
+					ID: msg.ID,
+				}
+				if msg.Values != nil {
+					val.Entries[i].Values = make(map[string]interface{}, len(msg.Values))
+					for k, v := range msg.Values {
+						val.Entries[i].Values[k] = v
+					}
+				}
+			}
+		}
+		// Clone Groups - simplified copy for now due to complexity
+		if cmd.val.Groups != nil {
+			val.Groups = make([]XInfoStreamGroup, len(cmd.val.Groups))
+			copy(val.Groups, cmd.val.Groups)
+		}
+	}
+	return &XInfoStreamFullCmd{
+		baseCmd: cmd.cloneBaseCmd(),
+		val:     val,
+	}
+}
+
 //------------------------------------------------------------------------------
 
 type ZSliceCmd struct {
@@ -2735,6 +3171,18 @@ func (cmd *ZSliceCmd) readReply(rd *proto.Reader) error { // nolint:dupl
 	return nil
 }
 
+func (cmd *ZSliceCmd) Clone() Cmder {
+	var val []Z
+	if cmd.val != nil {
+		val = make([]Z, len(cmd.val))
+		copy(val, cmd.val)
+	}
+	return &ZSliceCmd{
+		baseCmd: cmd.cloneBaseCmd(),
+		val:     val,
+	}
+}
+
 //------------------------------------------------------------------------------
 
 type ZWithKeyCmd struct {
@@ -2787,6 +3235,23 @@ func (cmd *ZWithKeyCmd) readReply(rd *proto.Reader) (err error) {
 	}
 
 	return nil
+}
+
+func (cmd *ZWithKeyCmd) Clone() Cmder {
+	var val *ZWithKey
+	if cmd.val != nil {
+		val = &ZWithKey{
+			Z: Z{
+				Score:  cmd.val.Score,
+				Member: cmd.val.Member,
+			},
+			Key: cmd.val.Key,
+		}
+	}
+	return &ZWithKeyCmd{
+		baseCmd: cmd.cloneBaseCmd(),
+		val:     val,
+	}
 }
 
 //------------------------------------------------------------------------------
@@ -2852,6 +3317,20 @@ func (cmd *ScanCmd) readReply(rd *proto.Reader) error {
 		}
 	}
 	return nil
+}
+
+func (cmd *ScanCmd) Clone() Cmder {
+	var page []string
+	if cmd.page != nil {
+		page = make([]string, len(cmd.page))
+		copy(page, cmd.page)
+	}
+	return &ScanCmd{
+		baseCmd: cmd.cloneBaseCmd(),
+		page:    page,
+		cursor:  cmd.cursor,
+		process: cmd.process,
+	}
 }
 
 // Iterator creates a new ScanIterator.
@@ -3000,6 +3479,38 @@ func (cmd *ClusterSlotsCmd) readReply(rd *proto.Reader) error {
 	return nil
 }
 
+func (cmd *ClusterSlotsCmd) Clone() Cmder {
+	var val []ClusterSlot
+	if cmd.val != nil {
+		val = make([]ClusterSlot, len(cmd.val))
+		for i, slot := range cmd.val {
+			val[i] = ClusterSlot{
+				Start: slot.Start,
+				End:   slot.End,
+			}
+			if slot.Nodes != nil {
+				val[i].Nodes = make([]ClusterNode, len(slot.Nodes))
+				for j, node := range slot.Nodes {
+					val[i].Nodes[j] = ClusterNode{
+						ID:   node.ID,
+						Addr: node.Addr,
+					}
+					if node.NetworkingMetadata != nil {
+						val[i].Nodes[j].NetworkingMetadata = make(map[string]string, len(node.NetworkingMetadata))
+						for k, v := range node.NetworkingMetadata {
+							val[i].Nodes[j].NetworkingMetadata[k] = v
+						}
+					}
+				}
+			}
+		}
+	}
+	return &ClusterSlotsCmd{
+		baseCmd: cmd.cloneBaseCmd(),
+		val:     val,
+	}
+}
+
 //------------------------------------------------------------------------------
 
 // GeoLocation is used with GeoAdd to add geospatial location.
@@ -3146,6 +3657,34 @@ func (cmd *GeoLocationCmd) readReply(rd *proto.Reader) error {
 	}
 
 	return nil
+}
+
+func (cmd *GeoLocationCmd) Clone() Cmder {
+	var q *GeoRadiusQuery
+	if cmd.q != nil {
+		q = &GeoRadiusQuery{
+			Radius:      cmd.q.Radius,
+			Unit:        cmd.q.Unit,
+			WithCoord:   cmd.q.WithCoord,
+			WithDist:    cmd.q.WithDist,
+			WithGeoHash: cmd.q.WithGeoHash,
+			Count:       cmd.q.Count,
+			Sort:        cmd.q.Sort,
+			Store:       cmd.q.Store,
+			StoreDist:   cmd.q.StoreDist,
+			withLen:     cmd.q.withLen,
+		}
+	}
+	var locations []GeoLocation
+	if cmd.locations != nil {
+		locations = make([]GeoLocation, len(cmd.locations))
+		copy(locations, cmd.locations)
+	}
+	return &GeoLocationCmd{
+		baseCmd:   cmd.cloneBaseCmd(),
+		q:         q,
+		locations: locations,
+	}
 }
 
 //------------------------------------------------------------------------------
@@ -3329,6 +3868,40 @@ func (cmd *GeoSearchLocationCmd) readReply(rd *proto.Reader) error {
 	return nil
 }
 
+func (cmd *GeoSearchLocationCmd) Clone() Cmder {
+	var opt *GeoSearchLocationQuery
+	if cmd.opt != nil {
+		opt = &GeoSearchLocationQuery{
+			GeoSearchQuery: GeoSearchQuery{
+				Member:     cmd.opt.Member,
+				Longitude:  cmd.opt.Longitude,
+				Latitude:   cmd.opt.Latitude,
+				Radius:     cmd.opt.Radius,
+				RadiusUnit: cmd.opt.RadiusUnit,
+				BoxWidth:   cmd.opt.BoxWidth,
+				BoxHeight:  cmd.opt.BoxHeight,
+				BoxUnit:    cmd.opt.BoxUnit,
+				Sort:       cmd.opt.Sort,
+				Count:      cmd.opt.Count,
+				CountAny:   cmd.opt.CountAny,
+			},
+			WithCoord: cmd.opt.WithCoord,
+			WithDist:  cmd.opt.WithDist,
+			WithHash:  cmd.opt.WithHash,
+		}
+	}
+	var val []GeoLocation
+	if cmd.val != nil {
+		val = make([]GeoLocation, len(cmd.val))
+		copy(val, cmd.val)
+	}
+	return &GeoSearchLocationCmd{
+		baseCmd: cmd.cloneBaseCmd(),
+		opt:     opt,
+		val:     val,
+	}
+}
+
 //------------------------------------------------------------------------------
 
 type GeoPos struct {
@@ -3401,6 +3974,25 @@ func (cmd *GeoPosCmd) readReply(rd *proto.Reader) error {
 	}
 
 	return nil
+}
+
+func (cmd *GeoPosCmd) Clone() Cmder {
+	var val []*GeoPos
+	if cmd.val != nil {
+		val = make([]*GeoPos, len(cmd.val))
+		for i, pos := range cmd.val {
+			if pos != nil {
+				val[i] = &GeoPos{
+					Longitude: pos.Longitude,
+					Latitude:  pos.Latitude,
+				}
+			}
+		}
+	}
+	return &GeoPosCmd{
+		baseCmd: cmd.cloneBaseCmd(),
+		val:     val,
+	}
 }
 
 //------------------------------------------------------------------------------
@@ -3583,6 +4175,39 @@ func (cmd *CommandsInfoCmd) readReply(rd *proto.Reader) error {
 	return nil
 }
 
+func (cmd *CommandsInfoCmd) Clone() Cmder {
+	var val map[string]*CommandInfo
+	if cmd.val != nil {
+		val = make(map[string]*CommandInfo, len(cmd.val))
+		for k, v := range cmd.val {
+			if v != nil {
+				newInfo := &CommandInfo{
+					Name:        v.Name,
+					Arity:       v.Arity,
+					FirstKeyPos: v.FirstKeyPos,
+					LastKeyPos:  v.LastKeyPos,
+					StepCount:   v.StepCount,
+					ReadOnly:    v.ReadOnly,
+					Tips:        v.Tips, // CommandPolicy can be shared as it's immutable
+				}
+				if v.Flags != nil {
+					newInfo.Flags = make([]string, len(v.Flags))
+					copy(newInfo.Flags, v.Flags)
+				}
+				if v.ACLFlags != nil {
+					newInfo.ACLFlags = make([]string, len(v.ACLFlags))
+					copy(newInfo.ACLFlags, v.ACLFlags)
+				}
+				val[k] = newInfo
+			}
+		}
+	}
+	return &CommandsInfoCmd{
+		baseCmd: cmd.cloneBaseCmd(),
+		val:     val,
+	}
+}
+
 //------------------------------------------------------------------------------
 
 type cmdsInfoCache struct {
@@ -3759,6 +4384,30 @@ func (cmd *SlowLogCmd) readReply(rd *proto.Reader) error {
 	return nil
 }
 
+func (cmd *SlowLogCmd) Clone() Cmder {
+	var val []SlowLog
+	if cmd.val != nil {
+		val = make([]SlowLog, len(cmd.val))
+		for i, log := range cmd.val {
+			val[i] = SlowLog{
+				ID:         log.ID,
+				Time:       log.Time,
+				Duration:   log.Duration,
+				ClientAddr: log.ClientAddr,
+				ClientName: log.ClientName,
+			}
+			if log.Args != nil {
+				val[i].Args = make([]string, len(log.Args))
+				copy(val[i].Args, log.Args)
+			}
+		}
+	}
+	return &SlowLogCmd{
+		baseCmd: cmd.cloneBaseCmd(),
+		val:     val,
+	}
+}
+
 //-----------------------------------------------------------------------
 
 type MapStringInterfaceCmd struct {
@@ -3823,6 +4472,20 @@ func (cmd *MapStringInterfaceCmd) readReply(rd *proto.Reader) error {
 	return nil
 }
 
+func (cmd *MapStringInterfaceCmd) Clone() Cmder {
+	var val map[string]interface{}
+	if cmd.val != nil {
+		val = make(map[string]interface{}, len(cmd.val))
+		for k, v := range cmd.val {
+			val[k] = v
+		}
+	}
+	return &MapStringInterfaceCmd{
+		baseCmd: cmd.cloneBaseCmd(),
+		val:     val,
+	}
+}
+
 //-----------------------------------------------------------------------
 
 type MapStringStringSliceCmd struct {
@@ -3885,6 +4548,25 @@ func (cmd *MapStringStringSliceCmd) readReply(rd *proto.Reader) error {
 		}
 	}
 	return nil
+}
+
+func (cmd *MapStringStringSliceCmd) Clone() Cmder {
+	var val []map[string]string
+	if cmd.val != nil {
+		val = make([]map[string]string, len(cmd.val))
+		for i, m := range cmd.val {
+			if m != nil {
+				val[i] = make(map[string]string, len(m))
+				for k, v := range m {
+					val[i][k] = v
+				}
+			}
+		}
+	}
+	return &MapStringStringSliceCmd{
+		baseCmd: cmd.cloneBaseCmd(),
+		val:     val,
+	}
 }
 
 // -----------------------------------------------------------------------
@@ -3964,6 +4646,20 @@ func (cmd *MapMapStringInterfaceCmd) readReply(rd *proto.Reader) (err error) {
 	return nil
 }
 
+func (cmd *MapMapStringInterfaceCmd) Clone() Cmder {
+	var val map[string]interface{}
+	if cmd.val != nil {
+		val = make(map[string]interface{}, len(cmd.val))
+		for k, v := range cmd.val {
+			val[k] = v
+		}
+	}
+	return &MapMapStringInterfaceCmd{
+		baseCmd: cmd.cloneBaseCmd(),
+		val:     val,
+	}
+}
+
 //-----------------------------------------------------------------------
 
 type MapStringInterfaceSliceCmd struct {
@@ -4029,6 +4725,25 @@ func (cmd *MapStringInterfaceSliceCmd) readReply(rd *proto.Reader) error {
 	return nil
 }
 
+func (cmd *MapStringInterfaceSliceCmd) Clone() Cmder {
+	var val []map[string]interface{}
+	if cmd.val != nil {
+		val = make([]map[string]interface{}, len(cmd.val))
+		for i, m := range cmd.val {
+			if m != nil {
+				val[i] = make(map[string]interface{}, len(m))
+				for k, v := range m {
+					val[i][k] = v
+				}
+			}
+		}
+	}
+	return &MapStringInterfaceSliceCmd{
+		baseCmd: cmd.cloneBaseCmd(),
+		val:     val,
+	}
+}
+
 //------------------------------------------------------------------------------
 
 type KeyValuesCmd struct {
@@ -4089,6 +4804,19 @@ func (cmd *KeyValuesCmd) readReply(rd *proto.Reader) (err error) {
 	}
 
 	return nil
+}
+
+func (cmd *KeyValuesCmd) Clone() Cmder {
+	var val []string
+	if cmd.val != nil {
+		val = make([]string, len(cmd.val))
+		copy(val, cmd.val)
+	}
+	return &KeyValuesCmd{
+		baseCmd: cmd.cloneBaseCmd(),
+		key:     cmd.key,
+		val:     val,
+	}
 }
 
 //------------------------------------------------------------------------------
@@ -4172,6 +4900,19 @@ func (cmd *ZSliceWithKeyCmd) readReply(rd *proto.Reader) (err error) {
 	}
 
 	return nil
+}
+
+func (cmd *ZSliceWithKeyCmd) Clone() Cmder {
+	var val []Z
+	if cmd.val != nil {
+		val = make([]Z, len(cmd.val))
+		copy(val, cmd.val)
+	}
+	return &ZSliceWithKeyCmd{
+		baseCmd: cmd.cloneBaseCmd(),
+		key:     cmd.key,
+		val:     val,
+	}
 }
 
 type Function struct {
@@ -4324,6 +5065,37 @@ func (cmd *FunctionListCmd) readFunctions(rd *proto.Reader) ([]Function, error) 
 		functions[i] = function
 	}
 	return functions, nil
+}
+
+func (cmd *FunctionListCmd) Clone() Cmder {
+	var val []Library
+	if cmd.val != nil {
+		val = make([]Library, len(cmd.val))
+		for i, lib := range cmd.val {
+			val[i] = Library{
+				Name:   lib.Name,
+				Engine: lib.Engine,
+				Code:   lib.Code,
+			}
+			if lib.Functions != nil {
+				val[i].Functions = make([]Function, len(lib.Functions))
+				for j, fn := range lib.Functions {
+					val[i].Functions[j] = Function{
+						Name:        fn.Name,
+						Description: fn.Description,
+					}
+					if fn.Flags != nil {
+						val[i].Functions[j].Flags = make([]string, len(fn.Flags))
+						copy(val[i].Functions[j].Flags, fn.Flags)
+					}
+				}
+			}
+		}
+	}
+	return &FunctionListCmd{
+		baseCmd: cmd.cloneBaseCmd(),
+		val:     val,
+	}
 }
 
 // FunctionStats contains information about the scripts currently executing on the server, and the available engines
@@ -4551,6 +5323,34 @@ func (cmd *FunctionStatsCmd) readRunningScripts(rd *proto.Reader) ([]RunningScri
 	return runningScripts, len(runningScripts) > 0, nil
 }
 
+func (cmd *FunctionStatsCmd) Clone() Cmder {
+	val := FunctionStats{
+		isRunning: cmd.val.isRunning,
+		rs:        cmd.val.rs, // RunningScript is a simple struct, can be copied directly
+	}
+	if cmd.val.Engines != nil {
+		val.Engines = make([]Engine, len(cmd.val.Engines))
+		copy(val.Engines, cmd.val.Engines)
+	}
+	if cmd.val.allrs != nil {
+		val.allrs = make([]RunningScript, len(cmd.val.allrs))
+		for i, rs := range cmd.val.allrs {
+			val.allrs[i] = RunningScript{
+				Name:     rs.Name,
+				Duration: rs.Duration,
+			}
+			if rs.Command != nil {
+				val.allrs[i].Command = make([]string, len(rs.Command))
+				copy(val.allrs[i].Command, rs.Command)
+			}
+		}
+	}
+	return &FunctionStatsCmd{
+		baseCmd: cmd.cloneBaseCmd(),
+		val:     val,
+	}
+}
+
 //------------------------------------------------------------------------------
 
 // LCSQuery is a parameter used for the LCS command
@@ -4727,6 +5527,25 @@ func (cmd *LCSCmd) readPosition(rd *proto.Reader) (pos LCSPosition, err error) {
 	return pos, nil
 }
 
+func (cmd *LCSCmd) Clone() Cmder {
+	var val *LCSMatch
+	if cmd.val != nil {
+		val = &LCSMatch{
+			MatchString: cmd.val.MatchString,
+			Len:         cmd.val.Len,
+		}
+		if cmd.val.Matches != nil {
+			val.Matches = make([]LCSMatchedPosition, len(cmd.val.Matches))
+			copy(val.Matches, cmd.val.Matches)
+		}
+	}
+	return &LCSCmd{
+		baseCmd:  cmd.cloneBaseCmd(),
+		readType: cmd.readType,
+		val:      val,
+	}
+}
+
 // ------------------------------------------------------------------------
 
 type KeyFlags struct {
@@ -4803,6 +5622,26 @@ func (cmd *KeyFlagsCmd) readReply(rd *proto.Reader) error {
 	}
 
 	return nil
+}
+
+func (cmd *KeyFlagsCmd) Clone() Cmder {
+	var val []KeyFlags
+	if cmd.val != nil {
+		val = make([]KeyFlags, len(cmd.val))
+		for i, kf := range cmd.val {
+			val[i] = KeyFlags{
+				Key: kf.Key,
+			}
+			if kf.Flags != nil {
+				val[i].Flags = make([]string, len(kf.Flags))
+				copy(val[i].Flags, kf.Flags)
+			}
+		}
+	}
+	return &KeyFlagsCmd{
+		baseCmd: cmd.cloneBaseCmd(),
+		val:     val,
+	}
 }
 
 // ---------------------------------------------------------------------------------------------------
@@ -4892,6 +5731,18 @@ func (cmd *ClusterLinksCmd) readReply(rd *proto.Reader) error {
 	}
 
 	return nil
+}
+
+func (cmd *ClusterLinksCmd) Clone() Cmder {
+	var val []ClusterLink
+	if cmd.val != nil {
+		val = make([]ClusterLink, len(cmd.val))
+		copy(val, cmd.val)
+	}
+	return &ClusterLinksCmd{
+		baseCmd: cmd.cloneBaseCmd(),
+		val:     val,
+	}
 }
 
 // ------------------------------------------------------------------------------------------------------------------
@@ -5044,6 +5895,28 @@ func (cmd *ClusterShardsCmd) readReply(rd *proto.Reader) error {
 	return nil
 }
 
+func (cmd *ClusterShardsCmd) Clone() Cmder {
+	var val []ClusterShard
+	if cmd.val != nil {
+		val = make([]ClusterShard, len(cmd.val))
+		for i, shard := range cmd.val {
+			val[i] = ClusterShard{}
+			if shard.Slots != nil {
+				val[i].Slots = make([]SlotRange, len(shard.Slots))
+				copy(val[i].Slots, shard.Slots)
+			}
+			if shard.Nodes != nil {
+				val[i].Nodes = make([]Node, len(shard.Nodes))
+				copy(val[i].Nodes, shard.Nodes)
+			}
+		}
+	}
+	return &ClusterShardsCmd{
+		baseCmd: cmd.cloneBaseCmd(),
+		val:     val,
+	}
+}
+
 // -----------------------------------------
 
 type RankScore struct {
@@ -5102,6 +5975,13 @@ func (cmd *RankWithScoreCmd) readReply(rd *proto.Reader) error {
 	cmd.val = RankScore{Rank: rank, Score: score}
 
 	return nil
+}
+
+func (cmd *RankWithScoreCmd) Clone() Cmder {
+	return &RankWithScoreCmd{
+		baseCmd: cmd.cloneBaseCmd(),
+		val:     cmd.val, // RankScore is a simple struct, can be copied directly
+	}
 }
 
 // --------------------------------------------------------------------------------------------------
@@ -5382,6 +6262,50 @@ func parseClientInfo(txt string) (info *ClientInfo, err error) {
 	return info, nil
 }
 
+func (cmd *ClientInfoCmd) Clone() Cmder {
+	var val *ClientInfo
+	if cmd.val != nil {
+		val = &ClientInfo{
+			ID:                 cmd.val.ID,
+			Addr:               cmd.val.Addr,
+			LAddr:              cmd.val.LAddr,
+			FD:                 cmd.val.FD,
+			Name:               cmd.val.Name,
+			Age:                cmd.val.Age,
+			Idle:               cmd.val.Idle,
+			Flags:              cmd.val.Flags,
+			DB:                 cmd.val.DB,
+			Sub:                cmd.val.Sub,
+			PSub:               cmd.val.PSub,
+			SSub:               cmd.val.SSub,
+			Multi:              cmd.val.Multi,
+			Watch:              cmd.val.Watch,
+			QueryBuf:           cmd.val.QueryBuf,
+			QueryBufFree:       cmd.val.QueryBufFree,
+			ArgvMem:            cmd.val.ArgvMem,
+			MultiMem:           cmd.val.MultiMem,
+			BufferSize:         cmd.val.BufferSize,
+			BufferPeak:         cmd.val.BufferPeak,
+			OutputBufferLength: cmd.val.OutputBufferLength,
+			OutputListLength:   cmd.val.OutputListLength,
+			OutputMemory:       cmd.val.OutputMemory,
+			TotalMemory:        cmd.val.TotalMemory,
+			IoThread:           cmd.val.IoThread,
+			Events:             cmd.val.Events,
+			LastCmd:            cmd.val.LastCmd,
+			User:               cmd.val.User,
+			Redir:              cmd.val.Redir,
+			Resp:               cmd.val.Resp,
+			LibName:            cmd.val.LibName,
+			LibVer:             cmd.val.LibVer,
+		}
+	}
+	return &ClientInfoCmd{
+		baseCmd: cmd.cloneBaseCmd(),
+		val:     val,
+	}
+}
+
 // -------------------------------------------
 
 type ACLLogEntry struct {
@@ -5491,6 +6415,69 @@ func (cmd *ACLLogCmd) readReply(rd *proto.Reader) error {
 	return nil
 }
 
+func (cmd *ACLLogCmd) Clone() Cmder {
+	var val []*ACLLogEntry
+	if cmd.val != nil {
+		val = make([]*ACLLogEntry, len(cmd.val))
+		for i, entry := range cmd.val {
+			if entry != nil {
+				val[i] = &ACLLogEntry{
+					Count:                entry.Count,
+					Reason:               entry.Reason,
+					Context:              entry.Context,
+					Object:               entry.Object,
+					Username:             entry.Username,
+					AgeSeconds:           entry.AgeSeconds,
+					EntryID:              entry.EntryID,
+					TimestampCreated:     entry.TimestampCreated,
+					TimestampLastUpdated: entry.TimestampLastUpdated,
+				}
+				// Clone ClientInfo if present
+				if entry.ClientInfo != nil {
+					val[i].ClientInfo = &ClientInfo{
+						ID:                 entry.ClientInfo.ID,
+						Addr:               entry.ClientInfo.Addr,
+						LAddr:              entry.ClientInfo.LAddr,
+						FD:                 entry.ClientInfo.FD,
+						Name:               entry.ClientInfo.Name,
+						Age:                entry.ClientInfo.Age,
+						Idle:               entry.ClientInfo.Idle,
+						Flags:              entry.ClientInfo.Flags,
+						DB:                 entry.ClientInfo.DB,
+						Sub:                entry.ClientInfo.Sub,
+						PSub:               entry.ClientInfo.PSub,
+						SSub:               entry.ClientInfo.SSub,
+						Multi:              entry.ClientInfo.Multi,
+						Watch:              entry.ClientInfo.Watch,
+						QueryBuf:           entry.ClientInfo.QueryBuf,
+						QueryBufFree:       entry.ClientInfo.QueryBufFree,
+						ArgvMem:            entry.ClientInfo.ArgvMem,
+						MultiMem:           entry.ClientInfo.MultiMem,
+						BufferSize:         entry.ClientInfo.BufferSize,
+						BufferPeak:         entry.ClientInfo.BufferPeak,
+						OutputBufferLength: entry.ClientInfo.OutputBufferLength,
+						OutputListLength:   entry.ClientInfo.OutputListLength,
+						OutputMemory:       entry.ClientInfo.OutputMemory,
+						TotalMemory:        entry.ClientInfo.TotalMemory,
+						IoThread:           entry.ClientInfo.IoThread,
+						Events:             entry.ClientInfo.Events,
+						LastCmd:            entry.ClientInfo.LastCmd,
+						User:               entry.ClientInfo.User,
+						Redir:              entry.ClientInfo.Redir,
+						Resp:               entry.ClientInfo.Resp,
+						LibName:            entry.ClientInfo.LibName,
+						LibVer:             entry.ClientInfo.LibVer,
+					}
+				}
+			}
+		}
+	}
+	return &ACLLogCmd{
+		baseCmd: cmd.cloneBaseCmd(),
+		val:     val,
+	}
+}
+
 // LibraryInfo holds the library info.
 type LibraryInfo struct {
 	LibName *string
@@ -5586,6 +6573,25 @@ func (cmd *InfoCmd) Item(section, key string) string {
 	}
 }
 
+func (cmd *InfoCmd) Clone() Cmder {
+	var val map[string]map[string]string
+	if cmd.val != nil {
+		val = make(map[string]map[string]string, len(cmd.val))
+		for section, sectionMap := range cmd.val {
+			if sectionMap != nil {
+				val[section] = make(map[string]string, len(sectionMap))
+				for k, v := range sectionMap {
+					val[section][k] = v
+				}
+			}
+		}
+	}
+	return &InfoCmd{
+		baseCmd: cmd.cloneBaseCmd(),
+		val:     val,
+	}
+}
+
 type MonitorStatus int
 
 const (
@@ -5669,4 +6675,10 @@ func (cmd *MonitorCmd) Stop() {
 	cmd.mu.Lock()
 	defer cmd.mu.Unlock()
 	cmd.status = monitorStatusStop
+}
+
+func (cmd *MonitorCmd) Clone() Cmder {
+	// MonitorCmd cannot be safely cloned due to channels and goroutines
+	// Return a new MonitorCmd with the same channel
+	return newMonitorCmd(cmd.ctx, cmd.ch)
 }

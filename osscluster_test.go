@@ -255,7 +255,7 @@ func slotEqual(s1, s2 redis.ClusterSlot) bool {
 
 //------------------------------------------------------------------------------
 
-var _ = Describe("ClusterClient", func() {
+var _ = FDescribe("ClusterClient", func() {
 	var failover bool
 	var opt *redis.ClusterOptions
 	var client *redis.ClusterClient

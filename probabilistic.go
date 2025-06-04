@@ -270,6 +270,13 @@ func (cmd *ScanDumpCmd) readReply(rd *proto.Reader) (err error) {
 	return nil
 }
 
+func (cmd *ScanDumpCmd) Clone() Cmder {
+	return &ScanDumpCmd{
+		baseCmd: cmd.cloneBaseCmd(),
+		val:     cmd.val, // ScanDump is a simple struct, can be copied directly
+	}
+}
+
 // Returns information about a Bloom filter.
 // For more information - https://redis.io/commands/bf.info/
 func (c cmdable) BFInfo(ctx context.Context, key string) *BFInfoCmd {
@@ -386,6 +393,13 @@ func (cmd *BFInfoCmd) readReply(rd *proto.Reader) (err error) {
 
 	cmd.val = result
 	return nil
+}
+
+func (cmd *BFInfoCmd) Clone() Cmder {
+	return &BFInfoCmd{
+		baseCmd: cmd.cloneBaseCmd(),
+		val:     cmd.val, // BFInfo is a simple struct, can be copied directly
+	}
 }
 
 // BFInfoCapacity returns information about the capacity of a Bloom filter.
@@ -692,6 +706,13 @@ func (cmd *CFInfoCmd) readReply(rd *proto.Reader) (err error) {
 	return nil
 }
 
+func (cmd *CFInfoCmd) Clone() Cmder {
+	return &CFInfoCmd{
+		baseCmd: cmd.cloneBaseCmd(),
+		val:     cmd.val, // CFInfo is a simple struct, can be copied directly
+	}
+}
+
 // CFInfo returns information about a Cuckoo filter.
 // For more information - https://redis.io/commands/cf.info/
 func (c cmdable) CFInfo(ctx context.Context, key string) *CFInfoCmd {
@@ -841,6 +862,13 @@ func (cmd *CMSInfoCmd) readReply(rd *proto.Reader) (err error) {
 
 	cmd.val = result
 	return nil
+}
+
+func (cmd *CMSInfoCmd) Clone() Cmder {
+	return &CMSInfoCmd{
+		baseCmd: cmd.cloneBaseCmd(),
+		val:     cmd.val, // CMSInfo is a simple struct, can be copied directly
+	}
 }
 
 // CMSInfo returns information about a Count-Min Sketch filter.
@@ -1036,6 +1064,13 @@ func (cmd *TopKInfoCmd) readReply(rd *proto.Reader) (err error) {
 
 	cmd.val = result
 	return nil
+}
+
+func (cmd *TopKInfoCmd) Clone() Cmder {
+	return &TopKInfoCmd{
+		baseCmd: cmd.cloneBaseCmd(),
+		val:     cmd.val, // TopKInfo is a simple struct, can be copied directly
+	}
 }
 
 // TopKInfo returns information about a Top-K filter.
@@ -1309,6 +1344,13 @@ func (cmd *TDigestInfoCmd) readReply(rd *proto.Reader) (err error) {
 
 	cmd.val = result
 	return nil
+}
+
+func (cmd *TDigestInfoCmd) Clone() Cmder {
+	return &TDigestInfoCmd{
+		baseCmd: cmd.cloneBaseCmd(),
+		val:     cmd.val, // TDigestInfo is a simple struct, can be copied directly
+	}
 }
 
 // TDigestInfo returns information about a t-Digest data structure.
