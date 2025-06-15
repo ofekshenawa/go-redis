@@ -116,11 +116,14 @@ type ClusterOptions struct {
 }
 
 func (opt *ClusterOptions) init() {
-	if opt.MaxRedirects == -1 {
-		opt.MaxRedirects = 0
-	} else if opt.MaxRedirects == 0 {
+	// MaxRedirects semantics:
+	// -1: Disable redirects entirely (return MOVED/ASK errors immediately)
+	// 0: Use default (3 retries)
+	// >0: Use the specified number of retries
+	if opt.MaxRedirects == 0 {
 		opt.MaxRedirects = 3
 	}
+	// Keep -1 as-is to disable redirects
 
 	if opt.RouteByLatency || opt.RouteRandomly {
 		opt.ReadOnly = true
@@ -1009,12 +1012,12 @@ func (c *ClusterClient) process(ctx context.Context, cmd Cmder) error {
 
 		if ask {
 			ask = false
-
 			pipe := node.Client.Pipeline()
 			_ = pipe.Process(ctx, NewCmd(ctx, "asking"))
 			_ = pipe.Process(ctx, cmd)
 			_, lastErr = pipe.Exec(ctx)
 		} else {
+			// Execute the command on the selected node
 			lastErr = c.routeAndRun(ctx, cmd)
 		}
 
@@ -1040,7 +1043,19 @@ func (c *ClusterClient) process(ctx context.Context, cmd Cmder) error {
 		var addr string
 		moved, ask, addr = isMovedError(lastErr)
 		if moved || ask {
-			c.state.LazyReload()
+			// Only handle redirects if MaxRedirects allows it
+			// When MaxRedirects = -1, redirects are disabled and should return the error
+			if c.opt.MaxRedirects < 0 {
+				return lastErr
+			}
+
+			// Force synchronous reload when handling MOVED/ASK errors
+			// to ensure we have up-to-date cluster state before retry
+			_, reloadErr := c.state.Reload(ctx)
+			if reloadErr != nil {
+				// If reload fails, fallback to lazy reload for next time
+				c.state.LazyReload()
+			}
 
 			var err error
 			node, err = c.nodes.GetOrCreate(addr)
@@ -1849,6 +1864,16 @@ func (c *ClusterClient) cmdsInfo(ctx context.Context) (map[string]*CommandInfo, 
 }
 
 func (c *ClusterClient) cmdInfo(ctx context.Context, name string) *CommandInfo {
+	// Use a separate context that won't be canceled to ensure command info lookup
+	// doesn't fail due to original context cancellation
+	// cmdInfoCtx := context.Background()
+	// if c.opt.ContextTimeoutEnabled && ctx != nil {
+	// 	// If context timeout is enabled, still use a reasonable timeout
+	// 	var cancel context.CancelFunc
+	// 	cmdInfoCtx, cancel = context.WithTimeout(context.Background(), 5*time.Second)
+	// 	defer cancel()
+	// }
+
 	cmdsInfo, err := c.cmdsInfoCache.Get(ctx)
 	if err != nil {
 		internal.Logger.Printf(context.TODO(), "getting command info: %s", err)

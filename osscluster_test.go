@@ -6,6 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"os"
+	"runtime"
+	"runtime/pprof"
 	"slices"
 	"strconv"
 	"strings"
@@ -14,10 +17,18 @@ import (
 
 	. "github.com/bsm/ginkgo/v2"
 	. "github.com/bsm/gomega"
-
+	"github.com/fortytw2/leaktest"
 	"github.com/redis/go-redis/v9"
 	"github.com/redis/go-redis/v9/internal/hashtag"
 )
+
+// leakCleanup holds the per-spec leak check function
+var leakCleanup func()
+
+// sanitizeFilename converts spaces and slashes into underscores
+func sanitizeFilename(s string) string {
+	return strings.NewReplacer(" ", "_", "/", "_").Replace(s)
+}
 
 type clusterScenario struct {
 	ports   []string
@@ -253,7 +264,7 @@ func slotEqual(s1, s2 redis.ClusterSlot) bool {
 	return true
 }
 
-//------------------------------------------------------------------------------
+// ------------------------------------------------------------------------------
 
 var _ = FDescribe("ClusterClient", func() {
 	var failover bool
@@ -1335,6 +1346,8 @@ var _ = FDescribe("ClusterClient", func() {
 
 	Describe("ClusterClient with ClusterSlots with multiple nodes per slot", func() {
 		BeforeEach(func() {
+			leakCleanup = leaktest.Check(GinkgoT())
+			GinkgoWriter.Printf("[DEBUG] goroutines at start: %d\n", runtime.NumGoroutine())
 			failover = true
 
 			opt = redisClusterOptions()
@@ -1384,6 +1397,21 @@ var _ = FDescribe("ClusterClient", func() {
 		})
 
 		AfterEach(func() {
+			leakCleanup()
+
+			// on failure, write out a full goroutine dump
+			if CurrentSpecReport().Failed() {
+				fname := fmt.Sprintf("goroutines-%s.txt", sanitizeFilename(CurrentSpecReport().LeafNodeText))
+				if f, err := os.Create(fname); err == nil {
+					pprof.Lookup("goroutine").WriteTo(f, 2)
+					f.Close()
+					GinkgoWriter.Printf("[DEBUG] wrote goroutine dump to %s\n", fname)
+				} else {
+					GinkgoWriter.Printf("[DEBUG] failed to write goroutine dump: %v\n", err)
+				}
+			}
+
+			GinkgoWriter.Printf("[DEBUG] goroutines at end:   %d\n", runtime.NumGoroutine())
 			failover = false
 
 			err := client.Close()
