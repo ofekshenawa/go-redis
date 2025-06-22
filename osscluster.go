@@ -116,14 +116,12 @@ type ClusterOptions struct {
 }
 
 func (opt *ClusterOptions) init() {
-	// MaxRedirects semantics:
-	// -1: Disable redirects entirely (return MOVED/ASK errors immediately)
-	// 0: Use default (3 retries)
-	// >0: Use the specified number of retries
-	if opt.MaxRedirects == 0 {
+	switch opt.MaxRedirects {
+	case -1:
+		opt.MaxRedirects = 0
+	case 0:
 		opt.MaxRedirects = 3
 	}
-	// Keep -1 as-is to disable redirects
 
 	if opt.RouteByLatency || opt.RouteRandomly {
 		opt.ReadOnly = true
