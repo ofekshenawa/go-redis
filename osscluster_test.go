@@ -266,7 +266,7 @@ func slotEqual(s1, s2 redis.ClusterSlot) bool {
 
 // ------------------------------------------------------------------------------
 
-var _ = FDescribe("ClusterClient", func() {
+var _ = Describe("ClusterClient", func() {
 	var failover bool
 	var opt *redis.ClusterOptions
 	var client *redis.ClusterClient
@@ -1344,7 +1344,7 @@ var _ = FDescribe("ClusterClient", func() {
 		assertClusterClient()
 	})
 
-	Describe("ClusterClient with ClusterSlots with multiple nodes per slot", func() {
+	FDescribe("ClusterClient with ClusterSlots with multiple nodes per slot", func() {
 		BeforeEach(func() {
 			leakCleanup = leaktest.Check(GinkgoT())
 			GinkgoWriter.Printf("[DEBUG] goroutines at start: %d\n", runtime.NumGoroutine())

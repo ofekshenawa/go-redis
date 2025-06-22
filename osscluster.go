@@ -1018,7 +1018,7 @@ func (c *ClusterClient) process(ctx context.Context, cmd Cmder) error {
 			_, lastErr = pipe.Exec(ctx)
 		} else {
 			// Execute the command on the selected node
-			lastErr = c.routeAndRun(ctx, cmd)
+			lastErr = c.routeAndRun(ctx, cmd, node)
 		}
 
 		// If there is no error - we are done.
@@ -1866,15 +1866,15 @@ func (c *ClusterClient) cmdsInfo(ctx context.Context) (map[string]*CommandInfo, 
 func (c *ClusterClient) cmdInfo(ctx context.Context, name string) *CommandInfo {
 	// Use a separate context that won't be canceled to ensure command info lookup
 	// doesn't fail due to original context cancellation
-	// cmdInfoCtx := context.Background()
-	// if c.opt.ContextTimeoutEnabled && ctx != nil {
-	// 	// If context timeout is enabled, still use a reasonable timeout
-	// 	var cancel context.CancelFunc
-	// 	cmdInfoCtx, cancel = context.WithTimeout(context.Background(), 5*time.Second)
-	// 	defer cancel()
-	// }
+	cmdInfoCtx := context.Background()
+	if c.opt.ContextTimeoutEnabled && ctx != nil {
+		// If context timeout is enabled, still use a reasonable timeout
+		var cancel context.CancelFunc
+		cmdInfoCtx, cancel = context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+	}
 
-	cmdsInfo, err := c.cmdsInfoCache.Get(ctx)
+	cmdsInfo, err := c.cmdsInfoCache.Get(cmdInfoCtx)
 	if err != nil {
 		internal.Logger.Printf(context.TODO(), "getting command info: %s", err)
 		return nil

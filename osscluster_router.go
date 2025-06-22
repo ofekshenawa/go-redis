@@ -18,7 +18,7 @@ type slotResult struct {
 }
 
 // routeAndRun routes a command to the appropriate cluster nodes and executes it
-func (c *ClusterClient) routeAndRun(ctx context.Context, cmd Cmder) error {
+func (c *ClusterClient) routeAndRun(ctx context.Context, cmd Cmder, node *clusterNode) error {
 	policy := c.getCommandPolicy(ctx, cmd)
 
 	switch {
@@ -29,9 +29,9 @@ func (c *ClusterClient) routeAndRun(ctx context.Context, cmd Cmder) error {
 	case policy != nil && policy.Request == routing.ReqMultiShard:
 		return c.executeMultiShard(ctx, cmd, policy)
 	case policy != nil && policy.Request == routing.ReqSpecial:
-		return c.executeSpecialCommand(ctx, cmd, policy)
+		return c.executeSpecialCommand(ctx, cmd, policy, node)
 	default:
-		return c.executeDefault(ctx, cmd, policy)
+		return c.executeDefault(ctx, cmd, policy, node)
 	}
 }
 
@@ -47,20 +47,15 @@ func (c *ClusterClient) getCommandPolicy(ctx context.Context, cmd Cmder) *routin
 }
 
 // executeDefault handles standard command routing based on keys
-func (c *ClusterClient) executeDefault(ctx context.Context, cmd Cmder, policy *routing.CommandPolicy) error {
+func (c *ClusterClient) executeDefault(ctx context.Context, cmd Cmder, policy *routing.CommandPolicy, node *clusterNode) error {
 	if c.hasKeys(cmd) {
-		return c.executeOnKeyBasedShard(ctx, cmd, policy)
+		return c.executeOnKeyBasedShard(ctx, cmd, policy, node)
 	}
 	return c.executeOnArbitraryShard(ctx, cmd, policy)
 }
 
 // executeOnKeyBasedShard routes command to shard based on first key
-func (c *ClusterClient) executeOnKeyBasedShard(ctx context.Context, cmd Cmder, policy *routing.CommandPolicy) error {
-	slot := c.cmdSlot(ctx, cmd)
-	node, err := c.cmdNode(ctx, cmd.Name(), slot)
-	if err != nil {
-		return err
-	}
+func (c *ClusterClient) executeOnKeyBasedShard(ctx context.Context, cmd Cmder, policy *routing.CommandPolicy, node *clusterNode) error {
 	return c.executeSingle(ctx, cmd, node, policy)
 }
 
@@ -161,13 +156,13 @@ func (c *ClusterClient) executeMultiSlot(ctx context.Context, cmd Cmder, slotMap
 }
 
 // executeSpecialCommand handles commands with special routing requirements
-func (c *ClusterClient) executeSpecialCommand(ctx context.Context, cmd Cmder, policy *routing.CommandPolicy) error {
+func (c *ClusterClient) executeSpecialCommand(ctx context.Context, cmd Cmder, policy *routing.CommandPolicy, node *clusterNode) error {
 	switch cmd.Name() {
 	case "ft.cursor":
 		return c.executeCursorCommand(ctx, cmd, policy)
 	default:
 		if c.hasKeys(cmd) {
-			return c.executeOnKeyBasedShard(ctx, cmd, policy)
+			return c.executeOnKeyBasedShard(ctx, cmd, policy, node)
 		}
 		return c.executeOnArbitraryShard(ctx, cmd, policy)
 	}
