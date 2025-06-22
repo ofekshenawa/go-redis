@@ -1344,7 +1344,7 @@ var _ = Describe("ClusterClient", func() {
 		assertClusterClient()
 	})
 
-	FDescribe("ClusterClient with ClusterSlots with multiple nodes per slot", func() {
+	Describe("ClusterClient with ClusterSlots with multiple nodes per slot", func() {
 		BeforeEach(func() {
 			leakCleanup = leaktest.Check(GinkgoT())
 			GinkgoWriter.Printf("[DEBUG] goroutines at start: %d\n", runtime.NumGoroutine())
