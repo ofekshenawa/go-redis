@@ -556,143 +556,6 @@ func (a *SpecialAggregator) SetAggregatorFunc(fn func([]interface{}, []error) (i
 // SpecialAggregatorRegistry holds custom aggregation functions for specific commands.
 var SpecialAggregatorRegistry = make(map[string]func([]interface{}, []error) (interface{}, error))
 
-// init registers special aggregators for known commands
-func init() {
-	// Register FT.SEARCH aggregator - custom search result merging
-	RegisterSpecialAggregator("FT.SEARCH", searchResultAggregator)
-	RegisterSpecialAggregator("ft.search", searchResultAggregator)
-
-	// Register FT.AGGREGATE aggregator - custom aggregation result merging
-	RegisterSpecialAggregator("FT.AGGREGATE", aggregateResultAggregator)
-	RegisterSpecialAggregator("ft.aggregate", aggregateResultAggregator)
-
-	// Register FT.SPELLCHECK aggregator - deduplication and score merging
-	RegisterSpecialAggregator("FT.SPELLCHECK", spellCheckAggregator)
-	RegisterSpecialAggregator("ft.spellcheck", spellCheckAggregator)
-
-	// Register FT.INFO aggregator - special handling for info results
-	RegisterSpecialAggregator("FT.INFO", infoAggregator)
-	RegisterSpecialAggregator("ft.info", infoAggregator)
-
-	// Register FT.PROFILE aggregator - depends on command arguments
-	RegisterSpecialAggregator("FT.PROFILE", profileAggregator)
-	RegisterSpecialAggregator("ft.profile", profileAggregator)
-}
-
-// searchResultAggregator handles FT.SEARCH response aggregation
-// Performs custom results merging, score-based sorting, and pagination
-func searchResultAggregator(results []interface{}, errors []error) (interface{}, error) {
-	// Return first non-error result or first error
-	for i, err := range errors {
-		if err == nil && results[i] != nil {
-			// For now, return the first successful result
-			// In a full implementation, this would merge results from all shards,
-			// sort by score, and handle pagination
-			return results[i], nil
-		}
-	}
-
-	// If all failed, return first error
-	for _, err := range errors {
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	return nil, nil
-}
-
-// aggregateResultAggregator handles FT.AGGREGATE response aggregation
-// Performs complex field extraction and merging, handles RESP2/RESP3 differences
-func aggregateResultAggregator(results []interface{}, errors []error) (interface{}, error) {
-	// Return first non-error result or first error
-	for i, err := range errors {
-		if err == nil && results[i] != nil {
-			// For now, return the first successful result
-			// In a full implementation, this would perform complex field merging
-			// and handle cursor-based pagination across shards
-			return results[i], nil
-		}
-	}
-
-	// If all failed, return first error
-	for _, err := range errors {
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	return nil, nil
-}
-
-// spellCheckAggregator handles FT.SPELLCHECK response aggregation
-// Deduplicates suggestions and merges scores
-func spellCheckAggregator(results []interface{}, errors []error) (interface{}, error) {
-	// Return first non-error result or first error
-	for i, err := range errors {
-		if err == nil && results[i] != nil {
-			// For now, return the first successful result
-			// In a full implementation, this would deduplicate suggestions
-			// and merge scores from all shards
-			return results[i], nil
-		}
-	}
-
-	// If all failed, return first error
-	for _, err := range errors {
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	return nil, nil
-}
-
-// infoAggregator handles FT.INFO response aggregation
-// Must be sent to all shards, not just masters
-func infoAggregator(results []interface{}, errors []error) (interface{}, error) {
-	// Return first non-error result or first error
-	for i, err := range errors {
-		if err == nil && results[i] != nil {
-			// For now, return the first successful result
-			// In a full implementation, this would merge info from all shards
-			return results[i], nil
-		}
-	}
-
-	// If all failed, return first error
-	for _, err := range errors {
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	return nil, nil
-}
-
-// profileAggregator handles FT.PROFILE response aggregation
-// Response type depends on command arguments
-func profileAggregator(results []interface{}, errors []error) (interface{}, error) {
-	// Return first non-error result or first error
-	for i, err := range errors {
-		if err == nil && results[i] != nil {
-			// For now, return the first successful result
-			// In a full implementation, this would handle different response types
-			// based on the profile command arguments
-			return results[i], nil
-		}
-	}
-
-	// If all failed, return first error
-	for _, err := range errors {
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	return nil, nil
-}
-
 // RegisterSpecialAggregator registers a custom aggregation function for a command.
 func RegisterSpecialAggregator(cmdName string, fn func([]interface{}, []error) (interface{}, error)) {
 	SpecialAggregatorRegistry[cmdName] = fn
@@ -745,3 +608,140 @@ func ExtractCommandValue(cmd interface{}) interface{} {
 		return nil
 	}
 }
+
+// // init registers special aggregators for known commands
+// func init() {
+// 	// Register FT.SEARCH aggregator - custom search result merging
+// 	RegisterSpecialAggregator("FT.SEARCH", searchResultAggregator)
+// 	RegisterSpecialAggregator("ft.search", searchResultAggregator)
+
+// 	// Register FT.AGGREGATE aggregator - custom aggregation result merging
+// 	RegisterSpecialAggregator("FT.AGGREGATE", aggregateResultAggregator)
+// 	RegisterSpecialAggregator("ft.aggregate", aggregateResultAggregator)
+
+// 	// Register FT.SPELLCHECK aggregator - deduplication and score merging
+// 	RegisterSpecialAggregator("FT.SPELLCHECK", spellCheckAggregator)
+// 	RegisterSpecialAggregator("ft.spellcheck", spellCheckAggregator)
+
+// 	// Register FT.INFO aggregator - special handling for info results
+// 	RegisterSpecialAggregator("FT.INFO", infoAggregator)
+// 	RegisterSpecialAggregator("ft.info", infoAggregator)
+
+// 	// Register FT.PROFILE aggregator - depends on command arguments
+// 	RegisterSpecialAggregator("FT.PROFILE", profileAggregator)
+// 	RegisterSpecialAggregator("ft.profile", profileAggregator)
+// }
+
+// // searchResultAggregator handles FT.SEARCH response aggregation
+// // Performs custom results merging, score-based sorting, and pagination
+// func searchResultAggregator(results []interface{}, errors []error) (interface{}, error) {
+// 	// Return first non-error result or first error
+// 	for i, err := range errors {
+// 		if err == nil && results[i] != nil {
+// 			// For now, return the first successful result
+// 			// In a full implementation, this would merge results from all shards,
+// 			// sort by score, and handle pagination
+// 			return results[i], nil
+// 		}
+// 	}
+
+// 	// If all failed, return first error
+// 	for _, err := range errors {
+// 		if err != nil {
+// 			return nil, err
+// 		}
+// 	}
+
+// 	return nil, nil
+// }
+
+// // aggregateResultAggregator handles FT.AGGREGATE response aggregation
+// // Performs complex field extraction and merging, handles RESP2/RESP3 differences
+// func aggregateResultAggregator(results []interface{}, errors []error) (interface{}, error) {
+// 	// Return first non-error result or first error
+// 	for i, err := range errors {
+// 		if err == nil && results[i] != nil {
+// 			// For now, return the first successful result
+// 			// In a full implementation, this would perform complex field merging
+// 			// and handle cursor-based pagination across shards
+// 			return results[i], nil
+// 		}
+// 	}
+
+// 	// If all failed, return first error
+// 	for _, err := range errors {
+// 		if err != nil {
+// 			return nil, err
+// 		}
+// 	}
+
+// 	return nil, nil
+// }
+
+// // spellCheckAggregator handles FT.SPELLCHECK response aggregation
+// // Deduplicates suggestions and merges scores
+// func spellCheckAggregator(results []interface{}, errors []error) (interface{}, error) {
+// 	// Return first non-error result or first error
+// 	for i, err := range errors {
+// 		if err == nil && results[i] != nil {
+// 			// For now, return the first successful result
+// 			// In a full implementation, this would deduplicate suggestions
+// 			// and merge scores from all shards
+// 			return results[i], nil
+// 		}
+// 	}
+
+// 	// If all failed, return first error
+// 	for _, err := range errors {
+// 		if err != nil {
+// 			return nil, err
+// 		}
+// 	}
+
+// 	return nil, nil
+// }
+
+// // infoAggregator handles FT.INFO response aggregation
+// // Must be sent to all shards, not just masters
+// func infoAggregator(results []interface{}, errors []error) (interface{}, error) {
+// 	// Return first non-error result or first error
+// 	for i, err := range errors {
+// 		if err == nil && results[i] != nil {
+// 			// For now, return the first successful result
+// 			// In a full implementation, this would merge info from all shards
+// 			return results[i], nil
+// 		}
+// 	}
+
+// 	// If all failed, return first error
+// 	for _, err := range errors {
+// 		if err != nil {
+// 			return nil, err
+// 		}
+// 	}
+
+// 	return nil, nil
+// }
+
+// // profileAggregator handles FT.PROFILE response aggregation
+// // Response type depends on command arguments
+// func profileAggregator(results []interface{}, errors []error) (interface{}, error) {
+// 	// Return first non-error result or first error
+// 	for i, err := range errors {
+// 		if err == nil && results[i] != nil {
+// 			// For now, return the first successful result
+// 			// In a full implementation, this would handle different response types
+// 			// based on the profile command arguments
+// 			return results[i], nil
+// 		}
+// 	}
+
+// 	// If all failed, return first error
+// 	for _, err := range errors {
+// 		if err != nil {
+// 			return nil, err
+// 		}
+// 	}
+
+// 	return nil, nil
+// }

@@ -37,9 +37,6 @@ func (c *ClusterClient) routeAndRun(ctx context.Context, cmd Cmder, node *cluste
 
 // getCommandPolicy retrieves the routing policy for a command
 func (c *ClusterClient) getCommandPolicy(ctx context.Context, cmd Cmder) *routing.CommandPolicy {
-	c.hooksMu.RLock()
-	defer c.hooksMu.RUnlock()
-
 	if cmdInfo := c.cmdInfo(ctx, cmd.Name()); cmdInfo != nil && cmdInfo.Tips != nil {
 		return cmdInfo.Tips
 	}
@@ -199,7 +196,7 @@ func (c *ClusterClient) executeSingle(ctx context.Context, cmd Cmder, node *clus
 		return err
 	}
 
-	return c.aggregateResponses(ctx, cmd, []Cmder{cmdCopy}, policy)
+	return c.aggregateResponses(cmd, []Cmder{cmdCopy}, policy)
 }
 
 // executeParallel executes a command on multiple nodes concurrently
@@ -241,7 +238,7 @@ func (c *ClusterClient) executeParallel(ctx context.Context, cmd Cmder, nodes []
 		cmds = append(cmds, result.cmd)
 	}
 
-	return c.aggregateResponses(ctx, cmd, cmds, policy)
+	return c.aggregateResponses(cmd, cmds, policy)
 }
 
 // aggregateMultiSlotResults aggregates results from multi-slot execution
@@ -299,7 +296,7 @@ func (c *ClusterClient) aggregateKeyedResponses(ctx context.Context, cmd Cmder, 
 }
 
 // aggregateResponses aggregates multiple shard responses
-func (c *ClusterClient) aggregateResponses(ctx context.Context, cmd Cmder, cmds []Cmder, policy *routing.CommandPolicy) error {
+func (c *ClusterClient) aggregateResponses(cmd Cmder, cmds []Cmder, policy *routing.CommandPolicy) error {
 	if len(cmds) == 0 {
 		return fmt.Errorf("redis: no commands to aggregate")
 	}
