@@ -67,7 +67,7 @@ func (c *ClusterClient) executeOnArbitraryShard(ctx context.Context, cmd Cmder, 
 
 // executeOnAllNodes executes command on all nodes (masters and replicas)
 func (c *ClusterClient) executeOnAllNodes(ctx context.Context, cmd Cmder, policy *routing.CommandPolicy) error {
-	state, err := c.state.ReloadOrGet(ctx)
+	state, err := c.state.Get(ctx)
 	if err != nil {
 		return err
 	}
@@ -82,7 +82,7 @@ func (c *ClusterClient) executeOnAllNodes(ctx context.Context, cmd Cmder, policy
 
 // executeOnAllShards executes command on all master shards
 func (c *ClusterClient) executeOnAllShards(ctx context.Context, cmd Cmder, policy *routing.CommandPolicy) error {
-	state, err := c.state.ReloadOrGet(ctx)
+	state, err := c.state.Get(ctx)
 	if err != nil {
 		return err
 	}
@@ -189,14 +189,13 @@ func (c *ClusterClient) executeCursorCommand(ctx context.Context, cmd Cmder, pol
 
 // executeSingle executes a command on a single node
 func (c *ClusterClient) executeSingle(ctx context.Context, cmd Cmder, node *clusterNode, policy *routing.CommandPolicy) error {
-	cmdCopy := cmd.Clone()
-	err := node.Client.Process(ctx, cmdCopy)
+	err := node.Client.Process(ctx, cmd)
 	if err != nil {
 		cmd.SetErr(err)
 		return err
 	}
 
-	return c.aggregateResponses(cmd, []Cmder{cmdCopy}, policy)
+	return c.aggregateResponses(cmd, []Cmder{cmd}, policy)
 }
 
 // executeParallel executes a command on multiple nodes concurrently
@@ -233,7 +232,7 @@ func (c *ClusterClient) executeParallel(ctx context.Context, cmd Cmder, nodes []
 	}()
 
 	// Collect results
-	var cmds []Cmder
+	cmds := make([]Cmder, 0, len(nodes))
 	for result := range results {
 		cmds = append(cmds, result.cmd)
 	}
@@ -327,6 +326,7 @@ func (c *ClusterClient) aggregateResponses(cmd Cmder, cmds []Cmder, policy *rout
 	return c.finishAggregation(cmd, aggregator)
 }
 
+// TODO: change this, use enums and add the type to the baseCmd
 // copyCommandResult copies the result from source command to destination command
 func (c *ClusterClient) copyCommandResult(dst, src Cmder) error {
 	// If both commands are the same type, we can use a more direct approach
@@ -404,7 +404,7 @@ func (c *ClusterClient) finishAggregation(cmd Cmder, aggregator routing.Response
 
 // pickArbitraryShard selects a master shard using the configured ShardPicker
 func (c *ClusterClient) pickArbitraryShard(ctx context.Context) *clusterNode {
-	state, err := c.state.ReloadOrGet(ctx)
+	state, err := c.state.Get(ctx)
 	if err != nil || len(state.Masters) == 0 {
 		return nil
 	}

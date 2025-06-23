@@ -266,7 +266,7 @@ func slotEqual(s1, s2 redis.ClusterSlot) bool {
 
 // ------------------------------------------------------------------------------
 
-var _ = FDescribe("ClusterClient", func() {
+var _ = Describe("ClusterClient", func() {
 	var failover bool
 	var opt *redis.ClusterOptions
 	var client *redis.ClusterClient
@@ -1056,6 +1056,10 @@ var _ = FDescribe("ClusterClient", func() {
 			Expect(stack).To(Equal([]string{
 				"cluster.BeforeProcess",
 				"shard.BeforeProcess",
+				"shard.BeforeProcess",
+				"shard.BeforeProcess",
+				"shard.AfterProcess",
+				"shard.AfterProcess",
 				"shard.AfterProcess",
 				"cluster.AfterProcess",
 			}))
