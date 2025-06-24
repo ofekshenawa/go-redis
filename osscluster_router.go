@@ -31,7 +31,7 @@ func (c *ClusterClient) routeAndRun(ctx context.Context, cmd Cmder, node *cluste
 	case policy != nil && policy.Request == routing.ReqSpecial:
 		return c.executeSpecialCommand(ctx, cmd, policy, node)
 	default:
-		return c.executeDefault(ctx, cmd, policy, node)
+		return c.executeDefault(ctx, cmd, node)
 	}
 }
 
@@ -44,25 +44,21 @@ func (c *ClusterClient) getCommandPolicy(ctx context.Context, cmd Cmder) *routin
 }
 
 // executeDefault handles standard command routing based on keys
-func (c *ClusterClient) executeDefault(ctx context.Context, cmd Cmder, policy *routing.CommandPolicy, node *clusterNode) error {
+func (c *ClusterClient) executeDefault(ctx context.Context, cmd Cmder, node *clusterNode) error {
 	if c.hasKeys(cmd) {
-		return c.executeOnKeyBasedShard(ctx, cmd, policy, node)
+		// execute on key based shard
+		return node.Client.Process(ctx, cmd)
 	}
-	return c.executeOnArbitraryShard(ctx, cmd, policy)
-}
-
-// executeOnKeyBasedShard routes command to shard based on first key
-func (c *ClusterClient) executeOnKeyBasedShard(ctx context.Context, cmd Cmder, policy *routing.CommandPolicy, node *clusterNode) error {
-	return c.executeSingle(ctx, cmd, node, policy)
+	return c.executeOnArbitraryShard(ctx, cmd)
 }
 
 // executeOnArbitraryShard routes command to an arbitrary shard
-func (c *ClusterClient) executeOnArbitraryShard(ctx context.Context, cmd Cmder, policy *routing.CommandPolicy) error {
+func (c *ClusterClient) executeOnArbitraryShard(ctx context.Context, cmd Cmder) error {
 	node := c.pickArbitraryShard(ctx)
 	if node == nil {
 		return errClusterNoNodes
 	}
-	return c.executeSingle(ctx, cmd, node, policy)
+	return node.Client.Process(ctx, cmd)
 }
 
 // executeOnAllNodes executes command on all nodes (masters and replicas)
@@ -158,10 +154,7 @@ func (c *ClusterClient) executeSpecialCommand(ctx context.Context, cmd Cmder, po
 	case "ft.cursor":
 		return c.executeCursorCommand(ctx, cmd, policy)
 	default:
-		if c.hasKeys(cmd) {
-			return c.executeOnKeyBasedShard(ctx, cmd, policy, node)
-		}
-		return c.executeOnArbitraryShard(ctx, cmd, policy)
+		return c.executeDefault(ctx, cmd, node)
 	}
 }
 
@@ -184,18 +177,7 @@ func (c *ClusterClient) executeCursorCommand(ctx context.Context, cmd Cmder, pol
 		return err
 	}
 
-	return c.executeSingle(ctx, cmd, node, policy)
-}
-
-// executeSingle executes a command on a single node
-func (c *ClusterClient) executeSingle(ctx context.Context, cmd Cmder, node *clusterNode, policy *routing.CommandPolicy) error {
-	err := node.Client.Process(ctx, cmd)
-	if err != nil {
-		cmd.SetErr(err)
-		return err
-	}
-
-	return c.aggregateResponses(cmd, []Cmder{cmd}, policy)
+	return node.Client.Process(ctx, cmd)
 }
 
 // executeParallel executes a command on multiple nodes concurrently
@@ -205,7 +187,7 @@ func (c *ClusterClient) executeParallel(ctx context.Context, cmd Cmder, nodes []
 	}
 
 	if len(nodes) == 1 {
-		return c.executeSingle(ctx, cmd, nodes[0], policy)
+		return nodes[0].Client.Process(ctx, cmd)
 	}
 
 	type nodeResult struct {
@@ -308,8 +290,6 @@ func (c *ClusterClient) aggregateResponses(cmd Cmder, cmds []Cmder, policy *rout
 			return err
 		}
 
-		// For single command, try to directly copy the result using reflection
-		// This handles complex command types like ClusterSlotsCmd that don't work with ExtractCommandValue
 		return c.copyCommandResult(cmd, shardCmd)
 	}
 
