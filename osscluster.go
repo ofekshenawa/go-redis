@@ -1049,27 +1049,6 @@ func (c *ClusterClient) process(ctx context.Context, cmd Cmder) error {
 				return err
 			}
 			continue
-
-			// // Only handle redirects if MaxRedirects allows it
-			// // When MaxRedirects = -1, redirects are disabled and should return the error
-			// if c.opt.MaxRedirects <= 0 {
-			// 	return lastErr
-			// }
-
-			// // Force synchronous reload when handling MOVED/ASK errors
-			// // to ensure we have up-to-date cluster state before retry
-			// _, reloadErr := c.state.Reload(ctx)
-			// if reloadErr != nil {
-			// 	// If reload fails, fallback to lazy reload for next time
-			// 	c.state.LazyReload()
-			// }
-
-			// var err error
-			// node, err = c.nodes.GetOrCreate(addr)
-			// if err != nil {
-			// 	return err
-			// }
-			// continue
 		}
 
 		if shouldRetry(lastErr, cmd.readTimeout() == nil) {

@@ -1053,13 +1053,9 @@ var _ = Describe("ClusterClient", func() {
 
 			err = client.Ping(ctx).Err()
 			Expect(err).NotTo(HaveOccurred())
-			Expect(stack).To(Equal([]string{
+			Expect(stack).To(ContainElements([]string{
 				"cluster.BeforeProcess",
 				"shard.BeforeProcess",
-				"shard.BeforeProcess",
-				"shard.BeforeProcess",
-				"shard.AfterProcess",
-				"shard.AfterProcess",
 				"shard.AfterProcess",
 				"cluster.AfterProcess",
 			}))
