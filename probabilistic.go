@@ -225,8 +225,9 @@ type ScanDumpCmd struct {
 func newScanDumpCmd(ctx context.Context, args ...interface{}) *ScanDumpCmd {
 	return &ScanDumpCmd{
 		baseCmd: baseCmd{
-			ctx:  ctx,
-			args: args,
+			ctx:     ctx,
+			args:    args,
+			cmdType: CmdTypeScanDump,
 		},
 	}
 }
@@ -303,8 +304,9 @@ type BFInfoCmd struct {
 func NewBFInfoCmd(ctx context.Context, args ...interface{}) *BFInfoCmd {
 	return &BFInfoCmd{
 		baseCmd: baseCmd{
-			ctx:  ctx,
-			args: args,
+			ctx:     ctx,
+			args:    args,
+			cmdType: CmdTypeBFInfo,
 		},
 	}
 }
@@ -639,8 +641,9 @@ type CFInfoCmd struct {
 func NewCFInfoCmd(ctx context.Context, args ...interface{}) *CFInfoCmd {
 	return &CFInfoCmd{
 		baseCmd: baseCmd{
-			ctx:  ctx,
-			args: args,
+			ctx:     ctx,
+			args:    args,
+			cmdType: CmdTypeCFInfo,
 		},
 	}
 }
@@ -808,8 +811,9 @@ type CMSInfoCmd struct {
 func NewCMSInfoCmd(ctx context.Context, args ...interface{}) *CMSInfoCmd {
 	return &CMSInfoCmd{
 		baseCmd: baseCmd{
-			ctx:  ctx,
-			args: args,
+			ctx:     ctx,
+			args:    args,
+			cmdType: CmdTypeCMSInfo,
 		},
 	}
 }
@@ -1008,8 +1012,9 @@ type TopKInfoCmd struct {
 func NewTopKInfoCmd(ctx context.Context, args ...interface{}) *TopKInfoCmd {
 	return &TopKInfoCmd{
 		baseCmd: baseCmd{
-			ctx:  ctx,
-			args: args,
+			ctx:     ctx,
+			args:    args,
+			cmdType: CmdTypeTopKInfo,
 		},
 	}
 }
@@ -1278,8 +1283,9 @@ type TDigestInfoCmd struct {
 func NewTDigestInfoCmd(ctx context.Context, args ...interface{}) *TDigestInfoCmd {
 	return &TDigestInfoCmd{
 		baseCmd: baseCmd{
-			ctx:  ctx,
-			args: args,
+			ctx:     ctx,
+			args:    args,
+			cmdType: CmdTypeTDigestInfo,
 		},
 	}
 }

@@ -486,8 +486,9 @@ type TSTimestampValueCmd struct {
 func newTSTimestampValueCmd(ctx context.Context, args ...interface{}) *TSTimestampValueCmd {
 	return &TSTimestampValueCmd{
 		baseCmd: baseCmd{
-			ctx:  ctx,
-			args: args,
+			ctx:     ctx,
+			args:    args,
+			cmdType: CmdTypeTSTimestampValue,
 		},
 	}
 }
@@ -711,8 +712,9 @@ type TSTimestampValueSliceCmd struct {
 func newTSTimestampValueSliceCmd(ctx context.Context, args ...interface{}) *TSTimestampValueSliceCmd {
 	return &TSTimestampValueSliceCmd{
 		baseCmd: baseCmd{
-			ctx:  ctx,
-			args: args,
+			ctx:     ctx,
+			args:    args,
+			cmdType: CmdTypeTSTimestampValueSlice,
 		},
 	}
 }

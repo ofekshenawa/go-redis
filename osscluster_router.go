@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"reflect"
 	"sync"
+	"time"
 
 	"github.com/redis/go-redis/v9/internal/hashtag"
 	"github.com/redis/go-redis/v9/internal/routing"
@@ -282,15 +283,14 @@ func (c *ClusterClient) aggregateResponses(cmd Cmder, cmds []Cmder, policy *rout
 		return fmt.Errorf("redis: no commands to aggregate")
 	}
 
-	// Handle single command case - copy the result directly to avoid aggregation overhead
 	if len(cmds) == 1 {
 		shardCmd := cmds[0]
 		if err := shardCmd.Err(); err != nil {
 			cmd.SetErr(err)
 			return err
 		}
-
-		return c.copyCommandResult(cmd, shardCmd)
+		value := routing.ExtractCommandValue(shardCmd)
+		return c.setCommandValue(cmd, value)
 	}
 
 	aggregator := c.createAggregator(policy, cmd, false)
@@ -304,57 +304,6 @@ func (c *ClusterClient) aggregateResponses(cmd Cmder, cmds []Cmder, policy *rout
 	}
 
 	return c.finishAggregation(cmd, aggregator)
-}
-
-// TODO: change this, use enums and add the type to the baseCmd
-// copyCommandResult copies the result from source command to destination command
-func (c *ClusterClient) copyCommandResult(dst, src Cmder) error {
-	// If both commands are the same type, we can use a more direct approach
-	srcVal := reflect.ValueOf(src)
-	dstVal := reflect.ValueOf(dst)
-
-	if srcVal.Type() == dstVal.Type() {
-		// Try to use the SetVal method approach for specific command types
-		switch srcCmd := src.(type) {
-		case *ClusterSlotsCmd:
-			if dstCmd, ok := dst.(*ClusterSlotsCmd); ok {
-				dstCmd.SetVal(srcCmd.Val())
-				return nil
-			}
-		case *ClusterShardsCmd:
-			if dstCmd, ok := dst.(*ClusterShardsCmd); ok {
-				dstCmd.SetVal(srcCmd.Val())
-				return nil
-			}
-		case *ClusterLinksCmd:
-			if dstCmd, ok := dst.(*ClusterLinksCmd); ok {
-				dstCmd.SetVal(srcCmd.Val())
-				return nil
-			}
-		case *StringCmd:
-			if dstCmd, ok := dst.(*StringCmd); ok {
-				dstCmd.SetVal(srcCmd.Val())
-				return nil
-			}
-		case *Cmd:
-			if dstCmd, ok := dst.(*Cmd); ok {
-				dstCmd.SetVal(srcCmd.Val())
-				return nil
-			}
-		default:
-			// Try generic reflection approach for other types
-			if srcValField := srcVal.Elem().FieldByName("val"); srcValField.IsValid() {
-				if dstValField := dstVal.Elem().FieldByName("val"); dstValField.IsValid() && dstValField.CanSet() {
-					dstValField.Set(srcValField)
-					return nil
-				}
-			}
-		}
-	}
-
-	// Fallback to the original extraction method
-	value := routing.ExtractCommandValue(src)
-	return c.setCommandValue(dst, value)
 }
 
 // createAggregator creates the appropriate response aggregator
@@ -399,7 +348,7 @@ func (c *ClusterClient) hasKeys(cmd Cmder) bool {
 	return firstKeyPos > 0
 }
 
-// setCommandValue sets the aggregated value on a command using reflection for type safety
+// setCommandValue sets the aggregated value on a command using the enum-based approach
 func (c *ClusterClient) setCommandValue(cmd Cmder, value interface{}) error {
 	// If value is nil, it might mean ExtractCommandValue couldn't extract the value
 	// but the command might have executed successfully. In this case, don't set an error.
@@ -416,32 +365,448 @@ func (c *ClusterClient) setCommandValue(cmd Cmder, value interface{}) error {
 		return Nil
 	}
 
-	// Use reflection to set the value on the command
+	switch cmd.GetCmdType() {
+	case CmdTypeGeneric:
+		if c, ok := cmd.(*Cmd); ok {
+			c.SetVal(value)
+		}
+	case CmdTypeString:
+		if c, ok := cmd.(*StringCmd); ok {
+			if v, ok := value.(string); ok {
+				c.SetVal(v)
+			}
+		}
+	case CmdTypeInt:
+		if c, ok := cmd.(*IntCmd); ok {
+			if v, ok := value.(int64); ok {
+				c.SetVal(v)
+			}
+		}
+	case CmdTypeBool:
+		if c, ok := cmd.(*BoolCmd); ok {
+			if v, ok := value.(bool); ok {
+				c.SetVal(v)
+			}
+		}
+	case CmdTypeFloat:
+		if c, ok := cmd.(*FloatCmd); ok {
+			if v, ok := value.(float64); ok {
+				c.SetVal(v)
+			}
+		}
+	case CmdTypeStringSlice:
+		if c, ok := cmd.(*StringSliceCmd); ok {
+			if v, ok := value.([]string); ok {
+				c.SetVal(v)
+			}
+		}
+	case CmdTypeIntSlice:
+		if c, ok := cmd.(*IntSliceCmd); ok {
+			if v, ok := value.([]int64); ok {
+				c.SetVal(v)
+			}
+		}
+	case CmdTypeFloatSlice:
+		if c, ok := cmd.(*FloatSliceCmd); ok {
+			if v, ok := value.([]float64); ok {
+				c.SetVal(v)
+			}
+		}
+	case CmdTypeBoolSlice:
+		if c, ok := cmd.(*BoolSliceCmd); ok {
+			if v, ok := value.([]bool); ok {
+				c.SetVal(v)
+			}
+		}
+	case CmdTypeMapStringString:
+		if c, ok := cmd.(*MapStringStringCmd); ok {
+			if v, ok := value.(map[string]string); ok {
+				c.SetVal(v)
+			}
+		}
+	case CmdTypeMapStringInt:
+		if c, ok := cmd.(*MapStringIntCmd); ok {
+			if v, ok := value.(map[string]int64); ok {
+				c.SetVal(v)
+			}
+		}
+	case CmdTypeMapStringInterface:
+		if c, ok := cmd.(*MapStringInterfaceCmd); ok {
+			if v, ok := value.(map[string]interface{}); ok {
+				c.SetVal(v)
+			}
+		}
+	case CmdTypeSlice:
+		if c, ok := cmd.(*SliceCmd); ok {
+			if v, ok := value.([]interface{}); ok {
+				c.SetVal(v)
+			}
+		}
+	case CmdTypeStatus:
+		if c, ok := cmd.(*StatusCmd); ok {
+			if v, ok := value.(string); ok {
+				c.SetVal(v)
+			}
+		}
+	case CmdTypeDuration:
+		if c, ok := cmd.(*DurationCmd); ok {
+			if v, ok := value.(time.Duration); ok {
+				c.SetVal(v)
+			}
+		}
+	case CmdTypeTime:
+		if c, ok := cmd.(*TimeCmd); ok {
+			if v, ok := value.(time.Time); ok {
+				c.SetVal(v)
+			}
+		}
+	case CmdTypeKeyValueSlice:
+		if c, ok := cmd.(*KeyValueSliceCmd); ok {
+			if v, ok := value.([]KeyValue); ok {
+				c.SetVal(v)
+			}
+		}
+	case CmdTypeStringStructMap:
+		if c, ok := cmd.(*StringStructMapCmd); ok {
+			if v, ok := value.(map[string]struct{}); ok {
+				c.SetVal(v)
+			}
+		}
+	case CmdTypeXMessageSlice:
+		if c, ok := cmd.(*XMessageSliceCmd); ok {
+			if v, ok := value.([]XMessage); ok {
+				c.SetVal(v)
+			}
+		}
+	case CmdTypeXStreamSlice:
+		if c, ok := cmd.(*XStreamSliceCmd); ok {
+			if v, ok := value.([]XStream); ok {
+				c.SetVal(v)
+			}
+		}
+	case CmdTypeXPending:
+		if c, ok := cmd.(*XPendingCmd); ok {
+			if v, ok := value.(*XPending); ok {
+				c.SetVal(v)
+			}
+		}
+	case CmdTypeXPendingExt:
+		if c, ok := cmd.(*XPendingExtCmd); ok {
+			if v, ok := value.([]XPendingExt); ok {
+				c.SetVal(v)
+			}
+		}
+	case CmdTypeXAutoClaim:
+		if c, ok := cmd.(*XAutoClaimCmd); ok {
+			if v, ok := value.([]XMessage); ok {
+				c.SetVal(v, "") // Default start value
+			}
+		}
+	case CmdTypeXAutoClaimJustID:
+		if c, ok := cmd.(*XAutoClaimJustIDCmd); ok {
+			if v, ok := value.([]string); ok {
+				c.SetVal(v, "") // Default start value
+			}
+		}
+	case CmdTypeXInfoConsumers:
+		if c, ok := cmd.(*XInfoConsumersCmd); ok {
+			if v, ok := value.([]XInfoConsumer); ok {
+				c.SetVal(v)
+			}
+		}
+	case CmdTypeXInfoGroups:
+		if c, ok := cmd.(*XInfoGroupsCmd); ok {
+			if v, ok := value.([]XInfoGroup); ok {
+				c.SetVal(v)
+			}
+		}
+	case CmdTypeXInfoStream:
+		if c, ok := cmd.(*XInfoStreamCmd); ok {
+			if v, ok := value.(*XInfoStream); ok {
+				c.SetVal(v)
+			}
+		}
+	case CmdTypeXInfoStreamFull:
+		if c, ok := cmd.(*XInfoStreamFullCmd); ok {
+			if v, ok := value.(*XInfoStreamFull); ok {
+				c.SetVal(v)
+			}
+		}
+	case CmdTypeZSlice:
+		if c, ok := cmd.(*ZSliceCmd); ok {
+			if v, ok := value.([]Z); ok {
+				c.SetVal(v)
+			}
+		}
+	case CmdTypeZWithKey:
+		if c, ok := cmd.(*ZWithKeyCmd); ok {
+			if v, ok := value.(*ZWithKey); ok {
+				c.SetVal(v)
+			}
+		}
+	case CmdTypeScan:
+		if c, ok := cmd.(*ScanCmd); ok {
+			if v, ok := value.([]string); ok {
+				c.SetVal(v, uint64(0)) // Default cursor
+			}
+		}
+	case CmdTypeClusterSlots:
+		if c, ok := cmd.(*ClusterSlotsCmd); ok {
+			if v, ok := value.([]ClusterSlot); ok {
+				c.SetVal(v)
+			}
+		}
+	case CmdTypeGeoLocation:
+		if c, ok := cmd.(*GeoLocationCmd); ok {
+			if v, ok := value.([]GeoLocation); ok {
+				c.SetVal(v)
+			}
+		}
+	case CmdTypeGeoSearchLocation:
+		if c, ok := cmd.(*GeoSearchLocationCmd); ok {
+			if v, ok := value.([]GeoLocation); ok {
+				c.SetVal(v)
+			}
+		}
+	case CmdTypeGeoPos:
+		if c, ok := cmd.(*GeoPosCmd); ok {
+			if v, ok := value.([]*GeoPos); ok {
+				c.SetVal(v)
+			}
+		}
+	case CmdTypeCommandsInfo:
+		if c, ok := cmd.(*CommandsInfoCmd); ok {
+			if v, ok := value.(map[string]*CommandInfo); ok {
+				c.SetVal(v)
+			}
+		}
+	case CmdTypeSlowLog:
+		if c, ok := cmd.(*SlowLogCmd); ok {
+			if v, ok := value.([]SlowLog); ok {
+				c.SetVal(v)
+			}
+		}
+	case CmdTypeMapStringStringSlice:
+		if c, ok := cmd.(*MapStringStringSliceCmd); ok {
+			if v, ok := value.([]map[string]string); ok {
+				c.SetVal(v)
+			}
+		}
+	case CmdTypeMapMapStringInterface:
+		if c, ok := cmd.(*MapMapStringInterfaceCmd); ok {
+			if v, ok := value.(map[string]interface{}); ok {
+				c.SetVal(v)
+			}
+		}
+	case CmdTypeMapStringInterfaceSlice:
+		if c, ok := cmd.(*MapStringInterfaceSliceCmd); ok {
+			if v, ok := value.([]map[string]interface{}); ok {
+				c.SetVal(v)
+			}
+		}
+	case CmdTypeKeyValues:
+		if c, ok := cmd.(*KeyValuesCmd); ok {
+			// KeyValuesCmd needs a key string and values slice
+			if key, ok := value.(string); ok {
+				c.SetVal(key, []string{}) // Default empty values
+			}
+		}
+	case CmdTypeZSliceWithKey:
+		if c, ok := cmd.(*ZSliceWithKeyCmd); ok {
+			// ZSliceWithKeyCmd needs a key string and Z slice
+			if key, ok := value.(string); ok {
+				c.SetVal(key, []Z{}) // Default empty Z slice
+			}
+		}
+	case CmdTypeFunctionList:
+		if c, ok := cmd.(*FunctionListCmd); ok {
+			if v, ok := value.([]Library); ok {
+				c.SetVal(v)
+			}
+		}
+	case CmdTypeFunctionStats:
+		if c, ok := cmd.(*FunctionStatsCmd); ok {
+			if v, ok := value.(FunctionStats); ok {
+				c.SetVal(v)
+			}
+		}
+	case CmdTypeLCS:
+		if c, ok := cmd.(*LCSCmd); ok {
+			if v, ok := value.(*LCSMatch); ok {
+				c.SetVal(v)
+			}
+		}
+	case CmdTypeKeyFlags:
+		if c, ok := cmd.(*KeyFlagsCmd); ok {
+			if v, ok := value.([]KeyFlags); ok {
+				c.SetVal(v)
+			}
+		}
+	case CmdTypeClusterLinks:
+		if c, ok := cmd.(*ClusterLinksCmd); ok {
+			if v, ok := value.([]ClusterLink); ok {
+				c.SetVal(v)
+			}
+		}
+	case CmdTypeClusterShards:
+		if c, ok := cmd.(*ClusterShardsCmd); ok {
+			if v, ok := value.([]ClusterShard); ok {
+				c.SetVal(v)
+			}
+		}
+	case CmdTypeRankWithScore:
+		if c, ok := cmd.(*RankWithScoreCmd); ok {
+			if v, ok := value.(RankScore); ok {
+				c.SetVal(v)
+			}
+		}
+	case CmdTypeClientInfo:
+		if c, ok := cmd.(*ClientInfoCmd); ok {
+			if v, ok := value.(*ClientInfo); ok {
+				c.SetVal(v)
+			}
+		}
+	case CmdTypeACLLog:
+		if c, ok := cmd.(*ACLLogCmd); ok {
+			if v, ok := value.([]*ACLLogEntry); ok {
+				c.SetVal(v)
+			}
+		}
+	case CmdTypeInfo:
+		if c, ok := cmd.(*InfoCmd); ok {
+			if v, ok := value.(map[string]map[string]string); ok {
+				c.SetVal(v)
+			}
+		}
+	case CmdTypeMonitor:
+		// MonitorCmd doesn't have SetVal method
+		// Skip setting value for MonitorCmd
+	case CmdTypeJSON:
+		if c, ok := cmd.(*JSONCmd); ok {
+			if v, ok := value.(string); ok {
+				c.SetVal(v)
+			}
+		}
+	case CmdTypeJSONSlice:
+		if c, ok := cmd.(*JSONSliceCmd); ok {
+			if v, ok := value.([]interface{}); ok {
+				c.SetVal(v)
+			}
+		}
+	case CmdTypeIntPointerSlice:
+		if c, ok := cmd.(*IntPointerSliceCmd); ok {
+			if v, ok := value.([]*int64); ok {
+				c.SetVal(v)
+			}
+		}
+	case CmdTypeScanDump:
+		if c, ok := cmd.(*ScanDumpCmd); ok {
+			if v, ok := value.(ScanDump); ok {
+				c.SetVal(v)
+			}
+		}
+	case CmdTypeBFInfo:
+		if c, ok := cmd.(*BFInfoCmd); ok {
+			if v, ok := value.(BFInfo); ok {
+				c.SetVal(v)
+			}
+		}
+	case CmdTypeCFInfo:
+		if c, ok := cmd.(*CFInfoCmd); ok {
+			if v, ok := value.(CFInfo); ok {
+				c.SetVal(v)
+			}
+		}
+	case CmdTypeCMSInfo:
+		if c, ok := cmd.(*CMSInfoCmd); ok {
+			if v, ok := value.(CMSInfo); ok {
+				c.SetVal(v)
+			}
+		}
+	case CmdTypeTopKInfo:
+		if c, ok := cmd.(*TopKInfoCmd); ok {
+			if v, ok := value.(TopKInfo); ok {
+				c.SetVal(v)
+			}
+		}
+	case CmdTypeTDigestInfo:
+		if c, ok := cmd.(*TDigestInfoCmd); ok {
+			if v, ok := value.(TDigestInfo); ok {
+				c.SetVal(v)
+			}
+		}
+	case CmdTypeFTSynDump:
+		if c, ok := cmd.(*FTSynDumpCmd); ok {
+			if v, ok := value.([]FTSynDumpResult); ok {
+				c.SetVal(v)
+			}
+		}
+	case CmdTypeAggregate:
+		if c, ok := cmd.(*AggregateCmd); ok {
+			if v, ok := value.(*FTAggregateResult); ok {
+				c.SetVal(v)
+			}
+		}
+	case CmdTypeFTInfo:
+		if c, ok := cmd.(*FTInfoCmd); ok {
+			if v, ok := value.(FTInfoResult); ok {
+				c.SetVal(v)
+			}
+		}
+	case CmdTypeFTSpellCheck:
+		if c, ok := cmd.(*FTSpellCheckCmd); ok {
+			if v, ok := value.([]SpellCheckResult); ok {
+				c.SetVal(v)
+			}
+		}
+	case CmdTypeFTSearch:
+		if c, ok := cmd.(*FTSearchCmd); ok {
+			if v, ok := value.(FTSearchResult); ok {
+				c.SetVal(v)
+			}
+		}
+	case CmdTypeTSTimestampValue:
+		if c, ok := cmd.(*TSTimestampValueCmd); ok {
+			if v, ok := value.(TSTimestampValue); ok {
+				c.SetVal(v)
+			}
+		}
+	case CmdTypeTSTimestampValueSlice:
+		if c, ok := cmd.(*TSTimestampValueSliceCmd); ok {
+			if v, ok := value.([]TSTimestampValue); ok {
+				c.SetVal(v)
+			}
+		}
+	default:
+		// Fallback to reflection for unknown types
+		return c.setCommandValueReflection(cmd, value)
+	}
+
+	return nil
+}
+
+// setCommandValueReflection is a fallback function that uses reflection
+func (c *ClusterClient) setCommandValueReflection(cmd Cmder, value interface{}) error {
 	cmdValue := reflect.ValueOf(cmd)
 	if cmdValue.Kind() != reflect.Ptr || cmdValue.IsNil() {
 		return fmt.Errorf("redis: invalid command pointer")
 	}
 
-	// Get the SetVal method
 	setValMethod := cmdValue.MethodByName("SetVal")
 	if !setValMethod.IsValid() {
 		return fmt.Errorf("redis: command %T does not have SetVal method", cmd)
 	}
 
-	// Prepare arguments for SetVal call
 	args := []reflect.Value{reflect.ValueOf(value)}
 
-	// Handle special cases that need additional arguments
 	switch cmd.(type) {
 	case *XAutoClaimCmd, *XAutoClaimJustIDCmd:
-		args = append(args, reflect.ValueOf("")) // Default start value
+		args = append(args, reflect.ValueOf(""))
 	case *ScanCmd:
-		args = append(args, reflect.ValueOf(uint64(0))) // Default cursor
+		args = append(args, reflect.ValueOf(uint64(0)))
 	case *KeyValuesCmd, *ZSliceWithKeyCmd:
-		// These need a key string and empty slice
 		if key, ok := value.(string); ok {
 			args = []reflect.Value{reflect.ValueOf(key)}
-			// Add appropriate empty slice based on command type
 			if _, ok := cmd.(*ZSliceWithKeyCmd); ok {
 				args = append(args, reflect.ValueOf([]Z{}))
 			} else {
@@ -450,7 +815,6 @@ func (c *ClusterClient) setCommandValue(cmd Cmder, value interface{}) error {
 		}
 	}
 
-	// Call SetVal with proper error handling
 	defer func() {
 		if r := recover(); r != nil {
 			cmd.SetErr(fmt.Errorf("redis: failed to set command value: %v", r))

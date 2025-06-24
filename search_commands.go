@@ -657,8 +657,9 @@ func ProcessAggregateResult(data []interface{}) (*FTAggregateResult, error) {
 func NewAggregateCmd(ctx context.Context, args ...interface{}) *AggregateCmd {
 	return &AggregateCmd{
 		baseCmd: baseCmd{
-			ctx:  ctx,
-			args: args,
+			ctx:     ctx,
+			args:    args,
+			cmdType: CmdTypeAggregate,
 		},
 	}
 }
@@ -1407,8 +1408,9 @@ type FTInfoCmd struct {
 func newFTInfoCmd(ctx context.Context, args ...interface{}) *FTInfoCmd {
 	return &FTInfoCmd{
 		baseCmd: baseCmd{
-			ctx:  ctx,
-			args: args,
+			ctx:     ctx,
+			args:    args,
+			cmdType: CmdTypeFTInfo,
 		},
 	}
 }
@@ -1588,8 +1590,9 @@ type FTSpellCheckCmd struct {
 func newFTSpellCheckCmd(ctx context.Context, args ...interface{}) *FTSpellCheckCmd {
 	return &FTSpellCheckCmd{
 		baseCmd: baseCmd{
-			ctx:  ctx,
-			args: args,
+			ctx:     ctx,
+			args:    args,
+			cmdType: CmdTypeFTSpellCheck,
 		},
 	}
 }
@@ -1795,8 +1798,9 @@ type FTSearchCmd struct {
 func newFTSearchCmd(ctx context.Context, options *FTSearchOptions, args ...interface{}) *FTSearchCmd {
 	return &FTSearchCmd{
 		baseCmd: baseCmd{
-			ctx:  ctx,
-			args: args,
+			ctx:     ctx,
+			args:    args,
+			cmdType: CmdTypeFTSearch,
 		},
 		options: options,
 	}
@@ -2178,8 +2182,9 @@ func (c cmdable) FTSearchWithArgs(ctx context.Context, index string, query strin
 func NewFTSynDumpCmd(ctx context.Context, args ...interface{}) *FTSynDumpCmd {
 	return &FTSynDumpCmd{
 		baseCmd: baseCmd{
-			ctx:  ctx,
-			args: args,
+			ctx:     ctx,
+			args:    args,
+			cmdType: CmdTypeFTSynDump,
 		},
 	}
 }

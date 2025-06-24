@@ -5,6 +5,151 @@ import (
 	"testing"
 )
 
+// Mock command types for testing
+type MockStringCmd struct {
+	cmdType CmdType
+	val     string
+}
+
+func (cmd *MockStringCmd) GetCmdType() CmdType {
+	return cmd.cmdType
+}
+
+func (cmd *MockStringCmd) Val() string {
+	return cmd.val
+}
+
+type MockIntCmd struct {
+	cmdType CmdType
+	val     int64
+}
+
+func (cmd *MockIntCmd) GetCmdType() CmdType {
+	return cmd.cmdType
+}
+
+func (cmd *MockIntCmd) Val() int64 {
+	return cmd.val
+}
+
+type MockBoolCmd struct {
+	cmdType CmdType
+	val     bool
+}
+
+func (cmd *MockBoolCmd) GetCmdType() CmdType {
+	return cmd.cmdType
+}
+
+func (cmd *MockBoolCmd) Val() bool {
+	return cmd.val
+}
+
+// Legacy command without GetCmdType for comparison
+type LegacyStringCmd struct {
+	val string
+}
+
+func (cmd *LegacyStringCmd) Val() string {
+	return cmd.val
+}
+
+func BenchmarkExtractCommandValueOptimized(b *testing.B) {
+	commands := []interface{}{
+		&MockStringCmd{cmdType: CmdTypeString, val: "test-value"},
+		&MockIntCmd{cmdType: CmdTypeInt, val: 42},
+		&MockBoolCmd{cmdType: CmdTypeBool, val: true},
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		for _, cmd := range commands {
+			ExtractCommandValue(cmd)
+		}
+	}
+}
+
+func BenchmarkExtractCommandValueLegacy(b *testing.B) {
+	commands := []interface{}{
+		&LegacyStringCmd{val: "test-value"},
+		&MockIntCmd{cmdType: CmdTypeInt, val: 42},
+		&MockBoolCmd{cmdType: CmdTypeBool, val: true},
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		for _, cmd := range commands {
+			ExtractCommandValue(cmd)
+		}
+	}
+}
+
+func TestExtractCommandValue(t *testing.T) {
+	tests := []struct {
+		name     string
+		cmd      interface{}
+		expected interface{}
+	}{
+		{
+			name:     "string command",
+			cmd:      &MockStringCmd{cmdType: CmdTypeString, val: "hello"},
+			expected: "hello",
+		},
+		{
+			name:     "int command",
+			cmd:      &MockIntCmd{cmdType: CmdTypeInt, val: 123},
+			expected: int64(123),
+		},
+		{
+			name:     "bool command",
+			cmd:      &MockBoolCmd{cmdType: CmdTypeBool, val: true},
+			expected: true,
+		},
+		{
+			name:     "unsupported command",
+			cmd:      &LegacyStringCmd{val: "test"},
+			expected: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := ExtractCommandValue(tt.cmd)
+			if result != tt.expected {
+				t.Errorf("ExtractCommandValue() = %v, want %v", result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestExtractCommandValueIntegration(t *testing.T) {
+	tests := []struct {
+		name     string
+		cmd      interface{}
+		expected interface{}
+	}{
+		{
+			name:     "optimized string command",
+			cmd:      &MockStringCmd{cmdType: CmdTypeString, val: "hello"},
+			expected: "hello",
+		},
+		{
+			name:     "legacy string command returns nil (no GetCmdType)",
+			cmd:      &LegacyStringCmd{val: "legacy"},
+			expected: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := ExtractCommandValue(tt.cmd)
+			if result != tt.expected {
+				t.Errorf("ExtractCommandValue() = %v, want %v", result, tt.expected)
+			}
+		})
+	}
+}
+
 func TestAllSucceededAggregator(t *testing.T) {
 	agg := &AllSucceededAggregator{}
 

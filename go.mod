@@ -7,11 +7,7 @@ require (
 	github.com/bsm/gomega v1.27.10
 	github.com/cespare/xxhash/v2 v2.3.0
 	github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f
-)
-
-require (
-	github.com/fortytw2/leaktest v1.3.0 // indirect
-	go.uber.org/goleak v1.3.0 // indirect
+	github.com/fortytw2/leaktest v1.3.0
 )
 
 retract (

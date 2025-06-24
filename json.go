@@ -68,8 +68,9 @@ var _ Cmder = (*JSONCmd)(nil)
 func newJSONCmd(ctx context.Context, args ...interface{}) *JSONCmd {
 	return &JSONCmd{
 		baseCmd: baseCmd{
-			ctx:  ctx,
-			args: args,
+			ctx:     ctx,
+			args:    args,
+			cmdType: CmdTypeJSON,
 		},
 	}
 }
@@ -167,8 +168,9 @@ type JSONSliceCmd struct {
 func NewJSONSliceCmd(ctx context.Context, args ...interface{}) *JSONSliceCmd {
 	return &JSONSliceCmd{
 		baseCmd: baseCmd{
-			ctx:  ctx,
-			args: args,
+			ctx:     ctx,
+			args:    args,
+			cmdType: CmdTypeJSONSlice,
 		},
 	}
 }
@@ -253,8 +255,9 @@ type IntPointerSliceCmd struct {
 func NewIntPointerSliceCmd(ctx context.Context, args ...interface{}) *IntPointerSliceCmd {
 	return &IntPointerSliceCmd{
 		baseCmd: baseCmd{
-			ctx:  ctx,
-			args: args,
+			ctx:     ctx,
+			args:    args,
+			cmdType: CmdTypeIntPointerSlice,
 		},
 	}
 }

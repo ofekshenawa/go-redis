@@ -999,6 +999,7 @@ var _ = Describe("ClusterClient", func() {
 			})
 			Expect(err).NotTo(HaveOccurred())
 
+			var mu sync.Mutex
 			var stack []string
 
 			clusterHook := &hook{
@@ -1011,12 +1012,16 @@ var _ = Describe("ClusterClient", func() {
 						}
 
 						Expect(cmd.String()).To(Equal("ping: "))
+						mu.Lock()
 						stack = append(stack, "cluster.BeforeProcess")
+						mu.Unlock()
 
 						err := hook(ctx, cmd)
 
 						Expect(cmd.String()).To(Equal("ping: PONG"))
+						mu.Lock()
 						stack = append(stack, "cluster.AfterProcess")
+						mu.Unlock()
 
 						return err
 					}
@@ -1034,12 +1039,16 @@ var _ = Describe("ClusterClient", func() {
 						}
 
 						Expect(cmd.String()).To(Equal("ping: "))
+						mu.Lock()
 						stack = append(stack, "shard.BeforeProcess")
+						mu.Unlock()
 
 						err := hook(ctx, cmd)
 
 						Expect(cmd.String()).To(Equal("ping: PONG"))
+						mu.Lock()
 						stack = append(stack, "shard.AfterProcess")
+						mu.Unlock()
 
 						return err
 					}
@@ -1053,7 +1062,13 @@ var _ = Describe("ClusterClient", func() {
 
 			err = client.Ping(ctx).Err()
 			Expect(err).NotTo(HaveOccurred())
-			Expect(stack).To(ContainElements([]string{
+
+			mu.Lock()
+			finalStack := make([]string, len(stack))
+			copy(finalStack, stack)
+			mu.Unlock()
+
+			Expect(finalStack).To(ContainElements([]string{
 				"cluster.BeforeProcess",
 				"shard.BeforeProcess",
 				"shard.AfterProcess",
@@ -1070,6 +1085,7 @@ var _ = Describe("ClusterClient", func() {
 			})
 			Expect(err).NotTo(HaveOccurred())
 
+			var mu sync.Mutex
 			var stack []string
 
 			client.AddHook(&hook{
@@ -1077,13 +1093,17 @@ var _ = Describe("ClusterClient", func() {
 					return func(ctx context.Context, cmds []redis.Cmder) error {
 						Expect(cmds).To(HaveLen(1))
 						Expect(cmds[0].String()).To(Equal("ping: "))
+						mu.Lock()
 						stack = append(stack, "cluster.BeforeProcessPipeline")
+						mu.Unlock()
 
 						err := hook(ctx, cmds)
 
 						Expect(cmds).To(HaveLen(1))
 						Expect(cmds[0].String()).To(Equal("ping: PONG"))
+						mu.Lock()
 						stack = append(stack, "cluster.AfterProcessPipeline")
+						mu.Unlock()
 
 						return err
 					}
@@ -1096,13 +1116,17 @@ var _ = Describe("ClusterClient", func() {
 						return func(ctx context.Context, cmds []redis.Cmder) error {
 							Expect(cmds).To(HaveLen(1))
 							Expect(cmds[0].String()).To(Equal("ping: "))
+							mu.Lock()
 							stack = append(stack, "shard.BeforeProcessPipeline")
+							mu.Unlock()
 
 							err := hook(ctx, cmds)
 
 							Expect(cmds).To(HaveLen(1))
 							Expect(cmds[0].String()).To(Equal("ping: PONG"))
+							mu.Lock()
 							stack = append(stack, "shard.AfterProcessPipeline")
+							mu.Unlock()
 
 							return err
 						}
@@ -1116,7 +1140,13 @@ var _ = Describe("ClusterClient", func() {
 				return nil
 			})
 			Expect(err).NotTo(HaveOccurred())
-			Expect(stack).To(Equal([]string{
+
+			mu.Lock()
+			finalStack := make([]string, len(stack))
+			copy(finalStack, stack)
+			mu.Unlock()
+
+			Expect(finalStack).To(Equal([]string{
 				"cluster.BeforeProcessPipeline",
 				"shard.BeforeProcessPipeline",
 				"shard.AfterProcessPipeline",
@@ -1133,6 +1163,7 @@ var _ = Describe("ClusterClient", func() {
 			})
 			Expect(err).NotTo(HaveOccurred())
 
+			var mu sync.Mutex
 			var stack []string
 
 			client.AddHook(&hook{
@@ -1140,13 +1171,17 @@ var _ = Describe("ClusterClient", func() {
 					return func(ctx context.Context, cmds []redis.Cmder) error {
 						Expect(cmds).To(HaveLen(3))
 						Expect(cmds[1].String()).To(Equal("ping: "))
+						mu.Lock()
 						stack = append(stack, "cluster.BeforeProcessPipeline")
+						mu.Unlock()
 
 						err := hook(ctx, cmds)
 
 						Expect(cmds).To(HaveLen(3))
 						Expect(cmds[1].String()).To(Equal("ping: PONG"))
+						mu.Lock()
 						stack = append(stack, "cluster.AfterProcessPipeline")
+						mu.Unlock()
 
 						return err
 					}
@@ -1159,13 +1194,17 @@ var _ = Describe("ClusterClient", func() {
 						return func(ctx context.Context, cmds []redis.Cmder) error {
 							Expect(cmds).To(HaveLen(3))
 							Expect(cmds[1].String()).To(Equal("ping: "))
+							mu.Lock()
 							stack = append(stack, "shard.BeforeProcessPipeline")
+							mu.Unlock()
 
 							err := hook(ctx, cmds)
 
 							Expect(cmds).To(HaveLen(3))
 							Expect(cmds[1].String()).To(Equal("ping: PONG"))
+							mu.Lock()
 							stack = append(stack, "shard.AfterProcessPipeline")
+							mu.Unlock()
 
 							return err
 						}
@@ -1179,7 +1218,13 @@ var _ = Describe("ClusterClient", func() {
 				return nil
 			})
 			Expect(err).NotTo(HaveOccurred())
-			Expect(stack).To(Equal([]string{
+
+			mu.Lock()
+			finalStack := make([]string, len(stack))
+			copy(finalStack, stack)
+			mu.Unlock()
+
+			Expect(finalStack).To(Equal([]string{
 				"cluster.BeforeProcessPipeline",
 				"shard.BeforeProcessPipeline",
 				"shard.AfterProcessPipeline",

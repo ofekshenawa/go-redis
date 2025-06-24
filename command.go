@@ -18,6 +18,80 @@ import (
 	"github.com/redis/go-redis/v9/internal/util"
 )
 
+type CmdType = routing.CmdType
+
+const (
+	CmdTypeGeneric                 = routing.CmdTypeGeneric
+	CmdTypeString                  = routing.CmdTypeString
+	CmdTypeInt                     = routing.CmdTypeInt
+	CmdTypeBool                    = routing.CmdTypeBool
+	CmdTypeFloat                   = routing.CmdTypeFloat
+	CmdTypeStringSlice             = routing.CmdTypeStringSlice
+	CmdTypeIntSlice                = routing.CmdTypeIntSlice
+	CmdTypeFloatSlice              = routing.CmdTypeFloatSlice
+	CmdTypeBoolSlice               = routing.CmdTypeBoolSlice
+	CmdTypeMapStringString         = routing.CmdTypeMapStringString
+	CmdTypeMapStringInt            = routing.CmdTypeMapStringInt
+	CmdTypeMapStringInterface      = routing.CmdTypeMapStringInterface
+	CmdTypeMapStringInterfaceSlice = routing.CmdTypeMapStringInterfaceSlice
+	CmdTypeSlice                   = routing.CmdTypeSlice
+	CmdTypeStatus                  = routing.CmdTypeStatus
+	CmdTypeDuration                = routing.CmdTypeDuration
+	CmdTypeTime                    = routing.CmdTypeTime
+	CmdTypeKeyValueSlice           = routing.CmdTypeKeyValueSlice
+	CmdTypeStringStructMap         = routing.CmdTypeStringStructMap
+	CmdTypeXMessageSlice           = routing.CmdTypeXMessageSlice
+	CmdTypeXStreamSlice            = routing.CmdTypeXStreamSlice
+	CmdTypeXPending                = routing.CmdTypeXPending
+	CmdTypeXPendingExt             = routing.CmdTypeXPendingExt
+	CmdTypeXAutoClaim              = routing.CmdTypeXAutoClaim
+	CmdTypeXAutoClaimJustID        = routing.CmdTypeXAutoClaimJustID
+	CmdTypeXInfoConsumers          = routing.CmdTypeXInfoConsumers
+	CmdTypeXInfoGroups             = routing.CmdTypeXInfoGroups
+	CmdTypeXInfoStream             = routing.CmdTypeXInfoStream
+	CmdTypeXInfoStreamFull         = routing.CmdTypeXInfoStreamFull
+	CmdTypeZSlice                  = routing.CmdTypeZSlice
+	CmdTypeZWithKey                = routing.CmdTypeZWithKey
+	CmdTypeScan                    = routing.CmdTypeScan
+	CmdTypeClusterSlots            = routing.CmdTypeClusterSlots
+	CmdTypeGeoLocation             = routing.CmdTypeGeoLocation
+	CmdTypeGeoSearchLocation       = routing.CmdTypeGeoSearchLocation
+	CmdTypeGeoPos                  = routing.CmdTypeGeoPos
+	CmdTypeCommandsInfo            = routing.CmdTypeCommandsInfo
+	CmdTypeSlowLog                 = routing.CmdTypeSlowLog
+	CmdTypeMapStringStringSlice    = routing.CmdTypeMapStringStringSlice
+	CmdTypeMapMapStringInterface   = routing.CmdTypeMapMapStringInterface
+	CmdTypeKeyValues               = routing.CmdTypeKeyValues
+	CmdTypeZSliceWithKey           = routing.CmdTypeZSliceWithKey
+	CmdTypeFunctionList            = routing.CmdTypeFunctionList
+	CmdTypeFunctionStats           = routing.CmdTypeFunctionStats
+	CmdTypeLCS                     = routing.CmdTypeLCS
+	CmdTypeKeyFlags                = routing.CmdTypeKeyFlags
+	CmdTypeClusterLinks            = routing.CmdTypeClusterLinks
+	CmdTypeClusterShards           = routing.CmdTypeClusterShards
+	CmdTypeRankWithScore           = routing.CmdTypeRankWithScore
+	CmdTypeClientInfo              = routing.CmdTypeClientInfo
+	CmdTypeACLLog                  = routing.CmdTypeACLLog
+	CmdTypeInfo                    = routing.CmdTypeInfo
+	CmdTypeMonitor                 = routing.CmdTypeMonitor
+	CmdTypeJSON                    = routing.CmdTypeJSON
+	CmdTypeJSONSlice               = routing.CmdTypeJSONSlice
+	CmdTypeIntPointerSlice         = routing.CmdTypeIntPointerSlice
+	CmdTypeScanDump                = routing.CmdTypeScanDump
+	CmdTypeBFInfo                  = routing.CmdTypeBFInfo
+	CmdTypeCFInfo                  = routing.CmdTypeCFInfo
+	CmdTypeCMSInfo                 = routing.CmdTypeCMSInfo
+	CmdTypeTopKInfo                = routing.CmdTypeTopKInfo
+	CmdTypeTDigestInfo             = routing.CmdTypeTDigestInfo
+	CmdTypeFTSynDump               = routing.CmdTypeFTSynDump
+	CmdTypeAggregate               = routing.CmdTypeAggregate
+	CmdTypeFTInfo                  = routing.CmdTypeFTInfo
+	CmdTypeFTSpellCheck            = routing.CmdTypeFTSpellCheck
+	CmdTypeFTSearch                = routing.CmdTypeFTSearch
+	CmdTypeTSTimestampValue        = routing.CmdTypeTSTimestampValue
+	CmdTypeTSTimestampValueSlice   = routing.CmdTypeTSTimestampValueSlice
+)
+
 type Cmder interface {
 	// command name.
 	// e.g. "set k v ex 10" -> "set", "cluster info" -> "cluster".
@@ -47,6 +121,9 @@ type Cmder interface {
 	readRawReply(rd *proto.Reader) error
 	SetErr(error)
 	Err() error
+
+	// GetCmdType returns the command type for fast value extraction
+	GetCmdType() CmdType
 }
 
 func setCmdsErr(cmds []Cmder, e error) {
@@ -132,6 +209,7 @@ type baseCmd struct {
 	keyPos       int8
 	rawVal       interface{}
 	_readTimeout *time.Duration
+	cmdType      CmdType
 }
 
 var _ Cmder = (*Cmd)(nil)
@@ -208,6 +286,10 @@ func (cmd *baseCmd) readRawReply(rd *proto.Reader) (err error) {
 	return err
 }
 
+func (cmd *baseCmd) GetCmdType() CmdType {
+	return cmd.cmdType
+}
+
 func (cmd *baseCmd) cloneBaseCmd() baseCmd {
 	var readTimeout *time.Duration
 	if cmd._readTimeout != nil {
@@ -226,6 +308,7 @@ func (cmd *baseCmd) cloneBaseCmd() baseCmd {
 		keyPos:       cmd.keyPos,
 		rawVal:       cmd.rawVal,
 		_readTimeout: readTimeout,
+		cmdType:      cmd.cmdType,
 	}
 }
 
@@ -240,8 +323,9 @@ type Cmd struct {
 func NewCmd(ctx context.Context, args ...interface{}) *Cmd {
 	return &Cmd{
 		baseCmd: baseCmd{
-			ctx:  ctx,
-			args: args,
+			ctx:     ctx,
+			args:    args,
+			cmdType: CmdTypeGeneric,
 		},
 	}
 }
@@ -534,8 +618,9 @@ var _ Cmder = (*SliceCmd)(nil)
 func NewSliceCmd(ctx context.Context, args ...interface{}) *SliceCmd {
 	return &SliceCmd{
 		baseCmd: baseCmd{
-			ctx:  ctx,
-			args: args,
+			ctx:     ctx,
+			args:    args,
+			cmdType: CmdTypeSlice,
 		},
 	}
 }
@@ -606,8 +691,9 @@ var _ Cmder = (*StatusCmd)(nil)
 func NewStatusCmd(ctx context.Context, args ...interface{}) *StatusCmd {
 	return &StatusCmd{
 		baseCmd: baseCmd{
-			ctx:  ctx,
-			args: args,
+			ctx:     ctx,
+			args:    args,
+			cmdType: CmdTypeStatus,
 		},
 	}
 }
@@ -657,8 +743,9 @@ var _ Cmder = (*IntCmd)(nil)
 func NewIntCmd(ctx context.Context, args ...interface{}) *IntCmd {
 	return &IntCmd{
 		baseCmd: baseCmd{
-			ctx:  ctx,
-			args: args,
+			ctx:     ctx,
+			args:    args,
+			cmdType: CmdTypeInt,
 		},
 	}
 }
@@ -708,8 +795,9 @@ var _ Cmder = (*IntSliceCmd)(nil)
 func NewIntSliceCmd(ctx context.Context, args ...interface{}) *IntSliceCmd {
 	return &IntSliceCmd{
 		baseCmd: baseCmd{
-			ctx:  ctx,
-			args: args,
+			ctx:     ctx,
+			args:    args,
+			cmdType: CmdTypeIntSlice,
 		},
 	}
 }
@@ -770,8 +858,9 @@ var _ Cmder = (*DurationCmd)(nil)
 func NewDurationCmd(ctx context.Context, precision time.Duration, args ...interface{}) *DurationCmd {
 	return &DurationCmd{
 		baseCmd: baseCmd{
-			ctx:  ctx,
-			args: args,
+			ctx:     ctx,
+			args:    args,
+			cmdType: CmdTypeDuration,
 		},
 		precision: precision,
 	}
@@ -830,8 +919,9 @@ var _ Cmder = (*TimeCmd)(nil)
 func NewTimeCmd(ctx context.Context, args ...interface{}) *TimeCmd {
 	return &TimeCmd{
 		baseCmd: baseCmd{
-			ctx:  ctx,
-			args: args,
+			ctx:     ctx,
+			args:    args,
+			cmdType: CmdTypeTime,
 		},
 	}
 }
@@ -888,8 +978,9 @@ var _ Cmder = (*BoolCmd)(nil)
 func NewBoolCmd(ctx context.Context, args ...interface{}) *BoolCmd {
 	return &BoolCmd{
 		baseCmd: baseCmd{
-			ctx:  ctx,
-			args: args,
+			ctx:     ctx,
+			args:    args,
+			cmdType: CmdTypeBool,
 		},
 	}
 }
@@ -942,8 +1033,9 @@ var _ Cmder = (*StringCmd)(nil)
 func NewStringCmd(ctx context.Context, args ...interface{}) *StringCmd {
 	return &StringCmd{
 		baseCmd: baseCmd{
-			ctx:  ctx,
-			args: args,
+			ctx:     ctx,
+			args:    args,
+			cmdType: CmdTypeString,
 		},
 	}
 }
@@ -968,7 +1060,7 @@ func (cmd *StringCmd) Bool() (bool, error) {
 	if cmd.err != nil {
 		return false, cmd.err
 	}
-	return strconv.ParseBool(cmd.val)
+	return strconv.ParseBool(cmd.Val())
 }
 
 func (cmd *StringCmd) Int() (int, error) {
@@ -1053,8 +1145,9 @@ var _ Cmder = (*FloatCmd)(nil)
 func NewFloatCmd(ctx context.Context, args ...interface{}) *FloatCmd {
 	return &FloatCmd{
 		baseCmd: baseCmd{
-			ctx:  ctx,
-			args: args,
+			ctx:     ctx,
+			args:    args,
+			cmdType: CmdTypeFloat,
 		},
 	}
 }
@@ -1100,8 +1193,9 @@ var _ Cmder = (*FloatSliceCmd)(nil)
 func NewFloatSliceCmd(ctx context.Context, args ...interface{}) *FloatSliceCmd {
 	return &FloatSliceCmd{
 		baseCmd: baseCmd{
-			ctx:  ctx,
-			args: args,
+			ctx:     ctx,
+			args:    args,
+			cmdType: CmdTypeFloatSlice,
 		},
 	}
 }
@@ -1167,8 +1261,9 @@ var _ Cmder = (*StringSliceCmd)(nil)
 func NewStringSliceCmd(ctx context.Context, args ...interface{}) *StringSliceCmd {
 	return &StringSliceCmd{
 		baseCmd: baseCmd{
-			ctx:  ctx,
-			args: args,
+			ctx:     ctx,
+			args:    args,
+			cmdType: CmdTypeStringSlice,
 		},
 	}
 }
@@ -1242,8 +1337,9 @@ var _ Cmder = (*KeyValueSliceCmd)(nil)
 func NewKeyValueSliceCmd(ctx context.Context, args ...interface{}) *KeyValueSliceCmd {
 	return &KeyValueSliceCmd{
 		baseCmd: baseCmd{
-			ctx:  ctx,
-			args: args,
+			ctx:     ctx,
+			args:    args,
+			cmdType: CmdTypeKeyValueSlice,
 		},
 	}
 }
@@ -1343,8 +1439,9 @@ var _ Cmder = (*BoolSliceCmd)(nil)
 func NewBoolSliceCmd(ctx context.Context, args ...interface{}) *BoolSliceCmd {
 	return &BoolSliceCmd{
 		baseCmd: baseCmd{
-			ctx:  ctx,
-			args: args,
+			ctx:     ctx,
+			args:    args,
+			cmdType: CmdTypeBoolSlice,
 		},
 	}
 }
@@ -1404,8 +1501,9 @@ var _ Cmder = (*MapStringStringCmd)(nil)
 func NewMapStringStringCmd(ctx context.Context, args ...interface{}) *MapStringStringCmd {
 	return &MapStringStringCmd{
 		baseCmd: baseCmd{
-			ctx:  ctx,
-			args: args,
+			ctx:     ctx,
+			args:    args,
+			cmdType: CmdTypeMapStringString,
 		},
 	}
 }
@@ -1497,8 +1595,9 @@ var _ Cmder = (*MapStringIntCmd)(nil)
 func NewMapStringIntCmd(ctx context.Context, args ...interface{}) *MapStringIntCmd {
 	return &MapStringIntCmd{
 		baseCmd: baseCmd{
-			ctx:  ctx,
-			args: args,
+			ctx:     ctx,
+			args:    args,
+			cmdType: CmdTypeMapStringInt,
 		},
 	}
 }
@@ -1564,8 +1663,9 @@ type MapStringSliceInterfaceCmd struct {
 func NewMapStringSliceInterfaceCmd(ctx context.Context, args ...interface{}) *MapStringSliceInterfaceCmd {
 	return &MapStringSliceInterfaceCmd{
 		baseCmd: baseCmd{
-			ctx:  ctx,
-			args: args,
+			ctx:     ctx,
+			args:    args,
+			cmdType: CmdTypeMapStringInterfaceSlice,
 		},
 	}
 }
@@ -1681,8 +1781,9 @@ var _ Cmder = (*StringStructMapCmd)(nil)
 func NewStringStructMapCmd(ctx context.Context, args ...interface{}) *StringStructMapCmd {
 	return &StringStructMapCmd{
 		baseCmd: baseCmd{
-			ctx:  ctx,
-			args: args,
+			ctx:     ctx,
+			args:    args,
+			cmdType: CmdTypeStringStructMap,
 		},
 	}
 }
@@ -1752,8 +1853,9 @@ var _ Cmder = (*XMessageSliceCmd)(nil)
 func NewXMessageSliceCmd(ctx context.Context, args ...interface{}) *XMessageSliceCmd {
 	return &XMessageSliceCmd{
 		baseCmd: baseCmd{
-			ctx:  ctx,
-			args: args,
+			ctx:     ctx,
+			args:    args,
+			cmdType: CmdTypeXMessageSlice,
 		},
 	}
 }
@@ -1880,8 +1982,9 @@ var _ Cmder = (*XStreamSliceCmd)(nil)
 func NewXStreamSliceCmd(ctx context.Context, args ...interface{}) *XStreamSliceCmd {
 	return &XStreamSliceCmd{
 		baseCmd: baseCmd{
-			ctx:  ctx,
-			args: args,
+			ctx:     ctx,
+			args:    args,
+			cmdType: CmdTypeXStreamSlice,
 		},
 	}
 }
@@ -1983,8 +2086,9 @@ var _ Cmder = (*XPendingCmd)(nil)
 func NewXPendingCmd(ctx context.Context, args ...interface{}) *XPendingCmd {
 	return &XPendingCmd{
 		baseCmd: baseCmd{
-			ctx:  ctx,
-			args: args,
+			ctx:     ctx,
+			args:    args,
+			cmdType: CmdTypeXPending,
 		},
 	}
 }
@@ -2087,8 +2191,9 @@ var _ Cmder = (*XPendingExtCmd)(nil)
 func NewXPendingExtCmd(ctx context.Context, args ...interface{}) *XPendingExtCmd {
 	return &XPendingExtCmd{
 		baseCmd: baseCmd{
-			ctx:  ctx,
-			args: args,
+			ctx:     ctx,
+			args:    args,
+			cmdType: CmdTypeXPendingExt,
 		},
 	}
 }
@@ -2169,8 +2274,9 @@ var _ Cmder = (*XAutoClaimCmd)(nil)
 func NewXAutoClaimCmd(ctx context.Context, args ...interface{}) *XAutoClaimCmd {
 	return &XAutoClaimCmd{
 		baseCmd: baseCmd{
-			ctx:  ctx,
-			args: args,
+			ctx:     ctx,
+			args:    args,
+			cmdType: CmdTypeXAutoClaim,
 		},
 	}
 }
@@ -2262,8 +2368,9 @@ var _ Cmder = (*XAutoClaimJustIDCmd)(nil)
 func NewXAutoClaimJustIDCmd(ctx context.Context, args ...interface{}) *XAutoClaimJustIDCmd {
 	return &XAutoClaimJustIDCmd{
 		baseCmd: baseCmd{
-			ctx:  ctx,
-			args: args,
+			ctx:     ctx,
+			args:    args,
+			cmdType: CmdTypeXAutoClaimJustID,
 		},
 	}
 }
@@ -2358,8 +2465,9 @@ var _ Cmder = (*XInfoConsumersCmd)(nil)
 func NewXInfoConsumersCmd(ctx context.Context, stream string, group string) *XInfoConsumersCmd {
 	return &XInfoConsumersCmd{
 		baseCmd: baseCmd{
-			ctx:  ctx,
-			args: []interface{}{"xinfo", "consumers", stream, group},
+			ctx:     ctx,
+			args:    []interface{}{"xinfo", "consumers", stream, group},
+			cmdType: CmdTypeXInfoConsumers,
 		},
 	}
 }
@@ -2458,8 +2566,9 @@ var _ Cmder = (*XInfoGroupsCmd)(nil)
 func NewXInfoGroupsCmd(ctx context.Context, stream string) *XInfoGroupsCmd {
 	return &XInfoGroupsCmd{
 		baseCmd: baseCmd{
-			ctx:  ctx,
-			args: []interface{}{"xinfo", "groups", stream},
+			ctx:     ctx,
+			args:    []interface{}{"xinfo", "groups", stream},
+			cmdType: CmdTypeXInfoGroups,
 		},
 	}
 }
@@ -2582,8 +2691,9 @@ var _ Cmder = (*XInfoStreamCmd)(nil)
 func NewXInfoStreamCmd(ctx context.Context, stream string) *XInfoStreamCmd {
 	return &XInfoStreamCmd{
 		baseCmd: baseCmd{
-			ctx:  ctx,
-			args: []interface{}{"xinfo", "stream", stream},
+			ctx:     ctx,
+			args:    []interface{}{"xinfo", "stream", stream},
+			cmdType: CmdTypeXInfoStream,
 		},
 	}
 }
@@ -2768,8 +2878,9 @@ var _ Cmder = (*XInfoStreamFullCmd)(nil)
 func NewXInfoStreamFullCmd(ctx context.Context, args ...interface{}) *XInfoStreamFullCmd {
 	return &XInfoStreamFullCmd{
 		baseCmd: baseCmd{
-			ctx:  ctx,
-			args: args,
+			ctx:     ctx,
+			args:    args,
+			cmdType: CmdTypeXInfoStreamFull,
 		},
 	}
 }
@@ -3106,8 +3217,9 @@ var _ Cmder = (*ZSliceCmd)(nil)
 func NewZSliceCmd(ctx context.Context, args ...interface{}) *ZSliceCmd {
 	return &ZSliceCmd{
 		baseCmd: baseCmd{
-			ctx:  ctx,
-			args: args,
+			ctx:     ctx,
+			args:    args,
+			cmdType: CmdTypeZSlice,
 		},
 	}
 }
@@ -3196,8 +3308,9 @@ var _ Cmder = (*ZWithKeyCmd)(nil)
 func NewZWithKeyCmd(ctx context.Context, args ...interface{}) *ZWithKeyCmd {
 	return &ZWithKeyCmd{
 		baseCmd: baseCmd{
-			ctx:  ctx,
-			args: args,
+			ctx:     ctx,
+			args:    args,
+			cmdType: CmdTypeZWithKey,
 		},
 	}
 }
@@ -3270,8 +3383,9 @@ var _ Cmder = (*ScanCmd)(nil)
 func NewScanCmd(ctx context.Context, process cmdable, args ...interface{}) *ScanCmd {
 	return &ScanCmd{
 		baseCmd: baseCmd{
-			ctx:  ctx,
-			args: args,
+			ctx:     ctx,
+			args:    args,
+			cmdType: CmdTypeScan,
 		},
 		process: process,
 	}
@@ -3365,8 +3479,9 @@ var _ Cmder = (*ClusterSlotsCmd)(nil)
 func NewClusterSlotsCmd(ctx context.Context, args ...interface{}) *ClusterSlotsCmd {
 	return &ClusterSlotsCmd{
 		baseCmd: baseCmd{
-			ctx:  ctx,
-			args: args,
+			ctx:     ctx,
+			args:    args,
+			cmdType: CmdTypeClusterSlots,
 		},
 	}
 }
@@ -3550,8 +3665,9 @@ var _ Cmder = (*GeoLocationCmd)(nil)
 func NewGeoLocationCmd(ctx context.Context, q *GeoRadiusQuery, args ...interface{}) *GeoLocationCmd {
 	return &GeoLocationCmd{
 		baseCmd: baseCmd{
-			ctx:  ctx,
-			args: geoLocationArgs(q, args...),
+			ctx:     ctx,
+			args:    geoLocationArgs(q, args...),
+			cmdType: CmdTypeGeoLocation,
 		},
 		q: q,
 	}
@@ -3794,8 +3910,9 @@ func NewGeoSearchLocationCmd(
 ) *GeoSearchLocationCmd {
 	return &GeoSearchLocationCmd{
 		baseCmd: baseCmd{
-			ctx:  ctx,
-			args: args,
+			ctx:     ctx,
+			args:    geoSearchLocationArgs(opt, args),
+			cmdType: CmdTypeGeoSearchLocation,
 		},
 		opt: opt,
 	}
@@ -3919,8 +4036,9 @@ var _ Cmder = (*GeoPosCmd)(nil)
 func NewGeoPosCmd(ctx context.Context, args ...interface{}) *GeoPosCmd {
 	return &GeoPosCmd{
 		baseCmd: baseCmd{
-			ctx:  ctx,
-			args: args,
+			ctx:     ctx,
+			args:    args,
+			cmdType: CmdTypeGeoPos,
 		},
 	}
 }
@@ -4020,8 +4138,9 @@ var _ Cmder = (*CommandsInfoCmd)(nil)
 func NewCommandsInfoCmd(ctx context.Context, args ...interface{}) *CommandsInfoCmd {
 	return &CommandsInfoCmd{
 		baseCmd: baseCmd{
-			ctx:  ctx,
-			args: args,
+			ctx:     ctx,
+			args:    args,
+			cmdType: CmdTypeCommandsInfo,
 		},
 	}
 }
@@ -4298,8 +4417,9 @@ var _ Cmder = (*SlowLogCmd)(nil)
 func NewSlowLogCmd(ctx context.Context, args ...interface{}) *SlowLogCmd {
 	return &SlowLogCmd{
 		baseCmd: baseCmd{
-			ctx:  ctx,
-			args: args,
+			ctx:     ctx,
+			args:    args,
+			cmdType: CmdTypeSlowLog,
 		},
 	}
 }
@@ -4421,8 +4541,9 @@ var _ Cmder = (*MapStringInterfaceCmd)(nil)
 func NewMapStringInterfaceCmd(ctx context.Context, args ...interface{}) *MapStringInterfaceCmd {
 	return &MapStringInterfaceCmd{
 		baseCmd: baseCmd{
-			ctx:  ctx,
-			args: args,
+			ctx:     ctx,
+			args:    args,
+			cmdType: CmdTypeMapStringInterface,
 		},
 	}
 }
@@ -4499,8 +4620,9 @@ var _ Cmder = (*MapStringStringSliceCmd)(nil)
 func NewMapStringStringSliceCmd(ctx context.Context, args ...interface{}) *MapStringStringSliceCmd {
 	return &MapStringStringSliceCmd{
 		baseCmd: baseCmd{
-			ctx:  ctx,
-			args: args,
+			ctx:     ctx,
+			args:    args,
+			cmdType: CmdTypeMapStringStringSlice,
 		},
 	}
 }
@@ -4579,8 +4701,9 @@ type MapMapStringInterfaceCmd struct {
 func NewMapMapStringInterfaceCmd(ctx context.Context, args ...interface{}) *MapMapStringInterfaceCmd {
 	return &MapMapStringInterfaceCmd{
 		baseCmd: baseCmd{
-			ctx:  ctx,
-			args: args,
+			ctx:     ctx,
+			args:    args,
+			cmdType: CmdTypeMapMapStringInterface,
 		},
 	}
 }
@@ -4673,8 +4796,9 @@ var _ Cmder = (*MapStringInterfaceSliceCmd)(nil)
 func NewMapStringInterfaceSliceCmd(ctx context.Context, args ...interface{}) *MapStringInterfaceSliceCmd {
 	return &MapStringInterfaceSliceCmd{
 		baseCmd: baseCmd{
-			ctx:  ctx,
-			args: args,
+			ctx:     ctx,
+			args:    args,
+			cmdType: CmdTypeMapStringInterfaceSlice,
 		},
 	}
 }
@@ -4758,8 +4882,9 @@ var _ Cmder = (*KeyValuesCmd)(nil)
 func NewKeyValuesCmd(ctx context.Context, args ...interface{}) *KeyValuesCmd {
 	return &KeyValuesCmd{
 		baseCmd: baseCmd{
-			ctx:  ctx,
-			args: args,
+			ctx:     ctx,
+			args:    args,
+			cmdType: CmdTypeKeyValues,
 		},
 	}
 }
@@ -4833,8 +4958,9 @@ var _ Cmder = (*ZSliceWithKeyCmd)(nil)
 func NewZSliceWithKeyCmd(ctx context.Context, args ...interface{}) *ZSliceWithKeyCmd {
 	return &ZSliceWithKeyCmd{
 		baseCmd: baseCmd{
-			ctx:  ctx,
-			args: args,
+			ctx:     ctx,
+			args:    args,
+			cmdType: CmdTypeZSliceWithKey,
 		},
 	}
 }
@@ -4939,8 +5065,9 @@ var _ Cmder = (*FunctionListCmd)(nil)
 func NewFunctionListCmd(ctx context.Context, args ...interface{}) *FunctionListCmd {
 	return &FunctionListCmd{
 		baseCmd: baseCmd{
-			ctx:  ctx,
-			args: args,
+			ctx:     ctx,
+			args:    args,
+			cmdType: CmdTypeFunctionList,
 		},
 	}
 }
@@ -5151,8 +5278,9 @@ var _ Cmder = (*FunctionStatsCmd)(nil)
 func NewFunctionStatsCmd(ctx context.Context, args ...interface{}) *FunctionStatsCmd {
 	return &FunctionStatsCmd{
 		baseCmd: baseCmd{
-			ctx:  ctx,
-			args: args,
+			ctx:     ctx,
+			args:    args,
+			cmdType: CmdTypeFunctionStats,
 		},
 	}
 }
@@ -5414,8 +5542,9 @@ func NewLCSCmd(ctx context.Context, q *LCSQuery) *LCSCmd {
 		}
 	}
 	cmd.baseCmd = baseCmd{
-		ctx:  ctx,
-		args: args,
+		ctx:     ctx,
+		args:    args,
+		cmdType: CmdTypeLCS,
 	}
 
 	return cmd
@@ -5564,8 +5693,9 @@ var _ Cmder = (*KeyFlagsCmd)(nil)
 func NewKeyFlagsCmd(ctx context.Context, args ...interface{}) *KeyFlagsCmd {
 	return &KeyFlagsCmd{
 		baseCmd: baseCmd{
-			ctx:  ctx,
-			args: args,
+			ctx:     ctx,
+			args:    args,
+			cmdType: CmdTypeKeyFlags,
 		},
 	}
 }
@@ -5666,8 +5796,9 @@ var _ Cmder = (*ClusterLinksCmd)(nil)
 func NewClusterLinksCmd(ctx context.Context, args ...interface{}) *ClusterLinksCmd {
 	return &ClusterLinksCmd{
 		baseCmd: baseCmd{
-			ctx:  ctx,
-			args: args,
+			ctx:     ctx,
+			args:    args,
+			cmdType: CmdTypeClusterLinks,
 		},
 	}
 }
@@ -5780,8 +5911,9 @@ var _ Cmder = (*ClusterShardsCmd)(nil)
 func NewClusterShardsCmd(ctx context.Context, args ...interface{}) *ClusterShardsCmd {
 	return &ClusterShardsCmd{
 		baseCmd: baseCmd{
-			ctx:  ctx,
-			args: args,
+			ctx:     ctx,
+			args:    args,
+			cmdType: CmdTypeClusterShards,
 		},
 	}
 }
@@ -5935,8 +6067,9 @@ var _ Cmder = (*RankWithScoreCmd)(nil)
 func NewRankWithScoreCmd(ctx context.Context, args ...interface{}) *RankWithScoreCmd {
 	return &RankWithScoreCmd{
 		baseCmd: baseCmd{
-			ctx:  ctx,
-			args: args,
+			ctx:     ctx,
+			args:    args,
+			cmdType: CmdTypeRankWithScore,
 		},
 	}
 }
@@ -6090,8 +6223,9 @@ var _ Cmder = (*ClientInfoCmd)(nil)
 func NewClientInfoCmd(ctx context.Context, args ...interface{}) *ClientInfoCmd {
 	return &ClientInfoCmd{
 		baseCmd: baseCmd{
-			ctx:  ctx,
-			args: args,
+			ctx:     ctx,
+			args:    args,
+			cmdType: CmdTypeClientInfo,
 		},
 	}
 }
@@ -6332,8 +6466,9 @@ var _ Cmder = (*ACLLogCmd)(nil)
 func NewACLLogCmd(ctx context.Context, args ...interface{}) *ACLLogCmd {
 	return &ACLLogCmd{
 		baseCmd: baseCmd{
-			ctx:  ctx,
-			args: args,
+			ctx:     ctx,
+			args:    args,
+			cmdType: CmdTypeACLLog,
 		},
 	}
 }
@@ -6506,8 +6641,9 @@ var _ Cmder = (*InfoCmd)(nil)
 func NewInfoCmd(ctx context.Context, args ...interface{}) *InfoCmd {
 	return &InfoCmd{
 		baseCmd: baseCmd{
-			ctx:  ctx,
-			args: args,
+			ctx:     ctx,
+			args:    args,
+			cmdType: CmdTypeInfo,
 		},
 	}
 }
@@ -6610,8 +6746,9 @@ type MonitorCmd struct {
 func newMonitorCmd(ctx context.Context, ch chan string) *MonitorCmd {
 	return &MonitorCmd{
 		baseCmd: baseCmd{
-			ctx:  ctx,
-			args: []interface{}{"monitor"},
+			ctx:     ctx,
+			args:    []interface{}{"monitor"},
+			cmdType: CmdTypeMonitor,
 		},
 		ch:     ch,
 		status: monitorStatusIdle,
