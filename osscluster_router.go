@@ -135,7 +135,8 @@ func (c *ClusterClient) executeMultiSlot(ctx context.Context, cmd Cmder, slotMap
 				return
 			}
 
-			subCmd := cmd.Clone() //TODO: BUG: cmd.clone copy all the command and not break it into several cmds
+			// Create a command for this specific slot's keys
+			subCmd := c.createSlotSpecificCommand(ctx, cmd, keys)
 			err = node.Client.Process(ctx, subCmd)
 			results <- slotResult{subCmd, keys, err}
 		}(slot, keys)
@@ -149,18 +150,38 @@ func (c *ClusterClient) executeMultiSlot(ctx context.Context, cmd Cmder, slotMap
 	return c.aggregateMultiSlotResults(ctx, cmd, results, keyOrder, policy)
 }
 
+// createSlotSpecificCommand creates a new command for a specific slot's keys
+func (c *ClusterClient) createSlotSpecificCommand(ctx context.Context, originalCmd Cmder, keys []string) Cmder {
+	originalArgs := originalCmd.Args()
+	firstKeyPos := int(cmdFirstKeyPos(originalCmd))
+
+	// Build new args with only the specified keys
+	newArgs := make([]interface{}, 0, firstKeyPos+len(keys))
+
+	// Copy command name and arguments before the keys
+	newArgs = append(newArgs, originalArgs[:firstKeyPos]...)
+
+	// Add the slot-specific keys
+	for _, key := range keys {
+		newArgs = append(newArgs, key)
+	}
+
+	// Create new command with the filtered keys
+	return NewCmd(ctx, newArgs...)
+}
+
 // executeSpecialCommand handles commands with special routing requirements
 func (c *ClusterClient) executeSpecialCommand(ctx context.Context, cmd Cmder, policy *routing.CommandPolicy, node *clusterNode) error {
 	switch cmd.Name() {
 	case "ft.cursor":
-		return c.executeCursorCommand(ctx, cmd, policy)
+		return c.executeCursorCommand(ctx, cmd)
 	default:
 		return c.executeDefault(ctx, cmd, node)
 	}
 }
 
 // executeCursorCommand handles FT.CURSOR commands with sticky routing
-func (c *ClusterClient) executeCursorCommand(ctx context.Context, cmd Cmder, policy *routing.CommandPolicy) error {
+func (c *ClusterClient) executeCursorCommand(ctx context.Context, cmd Cmder) error {
 	args := cmd.Args()
 	if len(args) < 4 {
 		return fmt.Errorf("redis: FT.CURSOR command requires at least 3 arguments")
