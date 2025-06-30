@@ -1694,7 +1694,8 @@ func (cmd *MapStringSliceInterfaceCmd) readReply(rd *proto.Reader) (err error) {
 
 	cmd.val = make(map[string][]interface{})
 
-	if readType == proto.RespMap {
+	switch readType {
+	case proto.RespMap:
 		n, err := rd.ReadMapLen()
 		if err != nil {
 			return err
@@ -1717,7 +1718,7 @@ func (cmd *MapStringSliceInterfaceCmd) readReply(rd *proto.Reader) (err error) {
 				cmd.val[k][j] = value
 			}
 		}
-	} else if readType == proto.RespArray {
+	case proto.RespArray:
 		// RESP2 response
 		n, err := rd.ReadArrayLen()
 		if err != nil {
@@ -4692,7 +4693,8 @@ func (cmd *MapStringStringSliceCmd) Clone() Cmder {
 }
 
 // -----------------------------------------------------------------------
-// MapStringInterfaceCmd represents a command that returns a map of strings to interface{}.
+
+// MapMapStringInterfaceCmd represents a command that returns a map of strings to interface{}.
 type MapMapStringInterfaceCmd struct {
 	baseCmd
 	val map[string]interface{}
