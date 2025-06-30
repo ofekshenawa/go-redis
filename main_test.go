@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"runtime"
-	"runtime/pprof"
 	"strconv"
 	"strings"
 	"sync"
@@ -149,21 +147,11 @@ var _ = BeforeSuite(func() {
 		// populate cluster node information
 		Expect(configureClusterTopology(ctx, cluster)).NotTo(HaveOccurred())
 	}
-	runtime.SetBlockProfileRate(1)
-	runtime.SetMutexProfileFraction(1)
 })
 
 var _ = AfterSuite(func() {
 	if !RECluster {
 		Expect(cluster.Close()).NotTo(HaveOccurred())
-	}
-	if f, err := os.Create("block.pprof"); err == nil {
-		pprof.Lookup("block").WriteTo(f, 0)
-		f.Close()
-	}
-	if f, err := os.Create("mutex.pprof"); err == nil {
-		pprof.Lookup("mutex").WriteTo(f, 0)
-		f.Close()
 	}
 })
 
