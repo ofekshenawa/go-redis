@@ -36,6 +36,9 @@ func (b *SearchBuilder) NoContent() *SearchBuilder { b.options.NoContent = true;
 // Verbatim includes VERBATIM.
 func (b *SearchBuilder) Verbatim() *SearchBuilder { b.options.Verbatim = true; return b }
 
+// NoStopWords includes NOSTOPWORDS.
+func (b *SearchBuilder) NoStopWords() *SearchBuilder { b.options.NoStopWords = true; return b }
+
 // WithPayloads includes WITHPAYLOADS.
 func (b *SearchBuilder) WithPayloads() *SearchBuilder {
 	b.options.WithPayloads = true
