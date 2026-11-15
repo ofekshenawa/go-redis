@@ -1,0 +1,125 @@
+name: Telemetry contract
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: telemetry-contract-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  compare:
+    name: Collect and compare telemetry
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      has_changes: ${{ steps.compare.outputs.has_changes }}
+    env:
+      GOTOOLCHAIN: local
+      GOWORK: 'off'
+      CGO_ENABLED: '0'
+    steps:
+      - name: Require a fresh workflow run
+        run: |
+          if [ "$GITHUB_RUN_ATTEMPT" != 1 ]; then
+            echo '::error::Re-runs are not supported. Push a new commit or reopen the PR for a fresh report and approval.'
+            exit 1
+          fi
+      - name: Check out the fixed merge candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          path: candidate
+          fetch-depth: 2
+          persist-credentials: false
+      - name: Check out the fixed base and trusted collector
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: base
+          persist-credentials: false
+      - name: Install the collector's Go version
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: base/tools/telemetry-contract/go.mod
+          cache: false
+      - name: Test and build the trusted collector
+        working-directory: base/tools/telemetry-contract
+        run: |
+          go test ./...
+          python3 -m unittest discover -v -p 'test_*.py'
+          go build -o "$RUNNER_TEMP/telemetry-contract" .
+      - name: Extract source contracts without executing client code
+        run: |
+          mkdir -p report
+          "$RUNNER_TEMP/telemetry-contract" -root "$GITHUB_WORKSPACE/base" -output report/base.json
+          "$RUNNER_TEMP/telemetry-contract" -root "$GITHUB_WORKSPACE/candidate" -output report/candidate.json
+      - name: Compare contracts
+        id: compare
+        run: |
+          "$RUNNER_TEMP/telemetry-contract" -base report/base.json -candidate report/candidate.json -report-dir report
+      - name: Publish the report before requesting approval
+        run: python3 base/tools/telemetry-contract/prepare.py base candidate report
+      - name: Save contracts, diff and exact candidate identity
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: telemetry-report-${{ github.run_id }}-${{ github.run_attempt }}
+          path: report/
+          if-no-files-found: error
+          retention-days: 30
+
+  review:
+    name: Approve telemetry changes
+    needs: compare
+    if: needs.compare.outputs.has_changes == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment:
+      name: telemetry-review
+      url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - name: Continue after native GitHub approval
+        run: echo 'Environment review completed. The final check will validate the reviewer and current PR.'
+
+  final:
+    name: telemetry-contract
+    needs: [compare, review]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Reject unsuccessful collection
+        env:
+          COLLECTION_RESULT: ${{ needs.compare.result }}
+        run: |
+          if [ "$COLLECTION_RESULT" != success ]; then
+            echo "::error::Telemetry collection/comparison $COLLECTION_RESULT. A collection error cannot be approved."
+            exit 1
+          fi
+      - name: Check out the trusted validator
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          persist-credentials: false
+      - name: Download this run's immutable report
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: telemetry-report-${{ github.run_id }}-${{ github.run_attempt }}
+          path: report
+      - name: Validate candidate, report and reviewer
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          COLLECTION_RESULT: ${{ needs.compare.result }}
+          APPROVAL_RESULT: ${{ needs.review.result }}
+          TELEMETRY_TOOL_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          python3 tools/telemetry-contract/gate.py \
+            --manifest report/manifest.json --delta report/delta.json --report report/report.md \
+            --collection-result "$COLLECTION_RESULT" --approval-result "$APPROVAL_RESULT"
