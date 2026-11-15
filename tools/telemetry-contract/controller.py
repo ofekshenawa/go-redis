@@ -337,6 +337,20 @@ def finish(state_dir, publish_result, approval_result, env, api):
         raise Rejected(reason) from None
 
 
+def fail(source_id, check_id, env, api):
+    """Block this controller's Check if state transfer/finalization failed."""
+    state = identity(env)
+    state.update(source_run_id=number(source_id, "source run"), check_id=number(check_id, "Check ID"))
+    prefix = "/repos/" + state["repository"]
+    source = source_run(api, prefix, state["source_run_id"], state["repository"])
+    state["source_head_sha"] = source["head_sha"]
+    # conclude verifies name, source head, Actions App and the source/controller
+    # external_id before writing. No downloaded state or report is required.
+    conclude(api, prefix, state, "failure",
+             "Telemetry finalization failed or was cancelled. No telemetry approval was accepted; start a fresh collection run.")
+    return "Telemetry Check marked as failed."
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
@@ -347,14 +361,19 @@ def main():
     finish_parser.add_argument("--state-dir", required=True)
     finish_parser.add_argument("--publish-result", required=True)
     finish_parser.add_argument("--approval-result", required=True)
+    fail_parser = commands.add_parser("fail")
+    fail_parser.add_argument("--source-run", required=True)
+    fail_parser.add_argument("--check-id", required=True)
     args = parser.parse_args()
     try:
         api = GitHub(os.environ.get("GITHUB_TOKEN"))
         if args.command == "prepare":
             prepare(args.source_run, args.state_dir, os.environ, api)
             print("Telemetry report verified and published.")
-        else:
+        elif args.command == "finish":
             print(finish(args.state_dir, args.publish_result, args.approval_result, os.environ, api))
+        else:
+            print(fail(args.source_run, args.check_id, os.environ, api))
         return 0
     except (Rejected, ValueError, KeyError, TypeError, AttributeError, OSError) as exc:
         reason = str(exc) if isinstance(exc, Rejected) else "Invalid controller data or API response."

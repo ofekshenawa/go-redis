@@ -279,6 +279,41 @@ class ControllerTests(unittest.TestCase):
             self.finish()
         self.assertEqual("in_progress", self.check()["status"])
 
+    def test_fallback_blocks_without_state_artifact(self):
+        self.prepare()
+        for path in self.state_dir.iterdir():
+            path.unlink()
+        self.state_dir.rmdir()
+        self.assertIn("failed", controller.fail(123, 100, self.env, self.api))
+        self.assertEqual("failure", self.check()["conclusion"])
+        self.assertEqual("completed", self.check()["status"])
+        self.assertFalse(self.state_dir.exists())
+
+    def test_fallback_cannot_change_another_controller_check(self):
+        self.prepare()
+        self.env["GITHUB_RUN_ID"] = "999"
+        writes = len(self.api.writes)
+        with self.assertRaisesRegex(Rejected, "Check identity"):
+            controller.fail(123, 100, self.env, self.api)
+        self.assertEqual(writes, len(self.api.writes))
+        self.assertEqual("in_progress", self.check()["status"])
+
+    def test_fallback_cannot_change_another_source_check(self):
+        self.prepare()
+        self.responses[self.prefix + "/actions/runs/124"] = dict(self.source, id=124)
+        writes = len(self.api.writes)
+        with self.assertRaisesRegex(Rejected, "Check identity"):
+            controller.fail(124, 100, self.env, self.api)
+        self.assertEqual(writes, len(self.api.writes))
+
+    def test_fallback_rejects_wrong_check_app(self):
+        self.prepare()
+        self.check()["app"]["id"] = 999
+        writes = len(self.api.writes)
+        with self.assertRaisesRegex(Rejected, "Check identity"):
+            controller.fail(123, 100, self.env, self.api)
+        self.assertEqual(writes, len(self.api.writes))
+
     def test_wrong_external_id_is_not_overwritten(self):
         self.prepare()
         self.check()["external_id"] = "another-controller"

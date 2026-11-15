@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: telemetry-review-${{ github.event.workflow_run.head_repository.id }}-${{ github.event.workflow_run.head_branch }}
+  group: telemetry-review-${{ github.event.workflow_run.id }}
   cancel-in-progress: true
 
 jobs:
@@ -90,3 +90,10 @@ jobs:
         run: |
           python3 tools/telemetry-contract/controller.py finish --state-dir state \
             --publish-result "$PUBLISH_RESULT" --approval-result "$APPROVAL_RESULT"
+      - name: Fail closed if review finalization could not complete
+        if: (failure() || cancelled()) && needs.publish.outputs.check_id != ''
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          SOURCE_RUN: ${{ github.event.workflow_run.id }}
+          CHECK_ID: ${{ needs.publish.outputs.check_id }}
+        run: python3 tools/telemetry-contract/controller.py fail --source-run "$SOURCE_RUN" --check-id "$CHECK_ID"
