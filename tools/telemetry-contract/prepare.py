@@ -4,7 +4,6 @@ import hashlib
 import json
 import os
 from pathlib import Path
-import re
 import subprocess
 import sys
 
@@ -38,38 +37,15 @@ def prepare(base, candidate, report):
     (report / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
     with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as summary:
         summary.write((report / "report.md").read_text())
-        summary.write("\n\n**To approve:** choose **Review deployments → telemetry-review → Approve and deploy** after reading the changes above. This validates telemetry only; nothing is deployed.\n\n")
+        summary.write("\n\n**Review:** the separate **Telemetry review** workflow will post this diff in the PR conversation. Follow the link in that comment to **Review deployments → telemetry-review**, then approve or reject. Nothing is deployed.\n\n")
         summary.write("<details><summary>Compared commits and report identity</summary>\n\n")
         summary.write(f"Base: `{parents[0]}`\n\nPR head: `{parents[1]}`\n\nMerge candidate: `{sha}`\n\n")
         summary.write(f"Report SHA-256: `{manifest['report_sha256']}`\n\n")
         summary.write("</details>\n")
 
 
-def announce(report):
-    """Expose the delta on the run overview before the Environment job waits."""
-    report_url = os.environ["TELEMETRY_REPORT_URL"]
-    prefix = ("https://github.com/" + os.environ["GITHUB_REPOSITORY"]
-              + "/actions/runs/" + os.environ["GITHUB_RUN_ID"] + "/artifacts/")
-    if not report_url.startswith(prefix) or not re.fullmatch(r"[0-9]+", report_url[len(prefix):]):
-        raise ValueError("Report link must identify an artifact from this workflow run.")
-    text = (Path(report) / "review.txt").read_bytes().decode("utf-8").strip()
-    if not text:
-        raise ValueError("Missing review summary.")
-    message = (text + "\nFull report: " + report_url
-               + "\nCompare the whole PR against its target branch. Read the report before approving telemetry-review.")
-    # Telemetry names originate in PR source. Escape workflow commands so names
-    # containing newlines or percent signs cannot emit additional annotations.
-    escaped = message.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
-    print("::notice title=Telemetry changes to approve::" + escaped)
-    with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as summary:
-        summary.write("\n[**Open the full telemetry report and captured contracts**](" + report_url + ")\n")
-
-
 if __name__ == "__main__":
     try:
-        if len(sys.argv) == 3 and sys.argv[1] == "--announce":
-            announce(sys.argv[2])
-        else:
-            prepare(*sys.argv[1:])
+        prepare(*sys.argv[1:])
     except (ValueError, KeyError, OSError, subprocess.CalledProcessError) as error:
         sys.exit(f"telemetry-contract: {error}")
