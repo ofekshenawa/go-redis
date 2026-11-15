@@ -1,6 +1,7 @@
 """Regression tests for binding report artifacts to a fresh PR candidate."""
 
 import hashlib
+import io
 import json
 import os
 from pathlib import Path
@@ -94,6 +95,33 @@ class PrepareTests(unittest.TestCase):
         with self.assertRaises(FileNotFoundError):
             self.run_prepare()
         self.assertFalse((self.report / "manifest.json").exists())
+
+    def test_notice_exposes_delta_and_exact_report_without_command_injection(self):
+        (self.report / "review.txt").write_text("+ metric requests; attrs +status\n::error::PR-controlled 50%\rname")
+        self.env["TELEMETRY_REPORT_URL"] = "https://github.com/example/client/actions/runs/456/artifacts/789"
+        with patch.dict(os.environ, self.env, clear=True), patch("sys.stdout", new_callable=io.StringIO) as output:
+            prepare.announce(str(self.report))
+        notice = output.getvalue()
+        self.assertEqual(len(notice.splitlines()), 1)
+        self.assertIn("::notice title=Telemetry changes to approve::+ metric requests", notice)
+        self.assertIn("%0A::error::PR-controlled 50%25%0Dname", notice)
+        self.assertIn(self.env["TELEMETRY_REPORT_URL"], notice)
+        self.assertIn("whole PR against its target branch", notice)
+        self.assertIn(self.env["TELEMETRY_REPORT_URL"], self.summary.read_text())
+
+    def test_rejects_notice_link_from_another_run_or_origin(self):
+        (self.report / "review.txt").write_text("+ metric requests")
+        for url in ("https://example.org/report", "https://github.com/example/client/actions/runs/999/artifacts/789",
+                    "https://github.com/example/client/actions/runs/456/artifacts/789?redirect=other"):
+            self.env["TELEMETRY_REPORT_URL"] = url
+            with self.subTest(url=url), patch.dict(os.environ, self.env, clear=True), self.assertRaisesRegex(ValueError, "this workflow run"):
+                prepare.announce(str(self.report))
+
+    def test_empty_notice_does_not_hide_changes(self):
+        (self.report / "review.txt").write_text(" \n")
+        self.env["TELEMETRY_REPORT_URL"] = "https://github.com/example/client/actions/runs/456/artifacts/789"
+        with patch.dict(os.environ, self.env, clear=True), self.assertRaisesRegex(ValueError, "Missing review summary"):
+            prepare.announce(str(self.report))
 
 
 if __name__ == "__main__":
