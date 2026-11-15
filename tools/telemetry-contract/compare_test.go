@@ -70,15 +70,14 @@ func TestCompareCLIChangesAreSuccessful(t *testing.T) {
 			t.Fatalf("missing %s in %s", line, outputs)
 		}
 	}
-	if !strings.Contains(stdout.String(), "approval required") || !strings.Contains(stdout.String(), "| Added | retries | — | int64 |") {
+	if !strings.Contains(stdout.String(), "approval required") || !strings.Contains(stdout.String(), "Metric changes: 1") || !strings.Contains(stdout.String(), "Attribute declaration changes: 1") {
 		t.Fatal(stdout.String())
 	}
-	if !strings.Contains(string(outputs), "review_summary=~ metric requests (Int64Counter, unit={request}); attrs +retries (int64)\n") {
-		t.Fatal(string(outputs))
+	if strings.Contains(string(outputs), "review_summary=") {
+		t.Fatal("obsolete dynamic review summary emitted")
 	}
-	review, err := os.ReadFile(filepath.Join(reportDir, "review.txt"))
-	if err != nil || !bytes.Contains(review, []byte("Full PR merge candidate versus target base:")) || !bytes.Contains(review, []byte("+retries (int64)")) {
-		t.Fatalf("review artifact: %s, %v", review, err)
+	if _, err := os.Stat(filepath.Join(reportDir, "review.txt")); !os.IsNotExist(err) {
+		t.Fatal("obsolete review.txt artifact emitted")
 	}
 }
 func TestComparisonNormalizesOrderingAndWhitespace(t *testing.T) {
@@ -217,15 +216,6 @@ func TestCaptureCLIHasNoGoldenFile(t *testing.T) {
 		t.Fatal("wrote failed capture")
 	}
 }
-func TestReportEscapesSourceText(t *testing.T) {
-	before := sampleContract()
-	after := sampleContract()
-	after.Metrics[0].Attributes = append(after.Metrics[0].Attributes, Attribute{"</pre><script>bad</script>", "string"})
-	_, report := compareContracts(before, after)
-	if bytes.Contains(report, []byte("<script>")) || !bytes.Contains(report, []byte("&lt;script&gt;")) {
-		t.Fatal(string(report))
-	}
-}
 func TestCLIRequiresExplicitModes(t *testing.T) {
 	for _, args := range [][]string{{}, {"-update"}, {"-output", "capture.json"}, {"-base", "base.json"}, {"-base", "base", "-candidate", "candidate", "-report-dir", "report", "-output", "file"}, {"-base", "base", "-candidate", "candidate", "-report-dir", "report", "-root", "source"}, {"unexpected"}} {
 		if err := runCLI(args, &bytes.Buffer{}, ""); err == nil {
@@ -234,57 +224,30 @@ func TestCLIRequiresExplicitModes(t *testing.T) {
 	}
 }
 
-func TestReportExplainsDefinitionsAndAttributeChanges(t *testing.T) {
+func TestDeltaRetainsAttributeTypeAndExtensionChanges(t *testing.T) {
 	before, after := sampleContract(), sampleContract()
-	before.Metrics[0].Attributes = append(before.Metrics[0].Attributes, Attribute{"removed", "bool"}, Attribute{"unchanged", "int64"})
-	after.Metrics[0].Instrument = "Float64Counter"
-	after.Metrics[0].Unit = "{operation}"
 	after.Metrics[0].ExternalAttributes = true
-	after.Metrics[0].Attributes = []Attribute{{"status", "int64"}, {"added", "string"}, {"unchanged", "int64"}}
-	before.Attributes = append(append([]Attribute{}, before.Metrics[0].Attributes...), Attribute{"unattached", "bool"})
-	after.Attributes = append(append([]Attribute{}, after.Metrics[0].Attributes...), Attribute{"unattached", "int64"})
-	delta, report := compareContracts(before, after)
-	text := string(report)
-	for _, want := range []string{
-		"full PR merge candidate versus its target base", "not a comparison with the previous PR commit",
-		"| 0 | 0 | 1 | 3 |", "## Changed metric: requests",
-		"| Instrument | Int64Counter | Float64Counter |", "| Unit | {request} | {operation} |",
-		"| Caller-provided attributes | No | Yes |", "| Type changed | status | string | int64 |",
-		"| Added | added | — | string |", "| Removed | removed | bool | — |",
-		"## Other attribute declarations", "| Type changed | unattached | bool | int64 |",
-	} {
-		if !strings.Contains(text, want) {
-			t.Fatalf("missing %q in %s", want, text)
-		}
+	after.Metrics[0].Attributes = []Attribute{{"status", "int64"}, {"added", "bool"}}
+	after.Attributes = append([]Attribute{}, after.Metrics[0].Attributes...)
+	delta, _ := compareContracts(before, after)
+	if len(delta.Changes) != 4 {
+		t.Fatal(delta)
 	}
-	if strings.Count(text, "| status |") != 1 || strings.Contains(text, "| unchanged |") {
-		t.Fatal("duplicated declaration or included unchanged attribute:", text)
-	}
-	// Presentation pairing must not alter the original structured remove/add delta.
-	actions := map[string]int{}
 	for _, change := range delta.Changes {
 		if change.Entity == "metric" {
-			actions[change.Action]++
+			if change.Action != "modify" {
+				t.Fatal(change)
+			}
+			old, current := change.Before.(Metric), change.After.(Metric)
+			if old.ExternalAttributes || !current.ExternalAttributes || old.Attributes[0].Type != "string" || current.Attributes[0].Type != "int64" || len(current.Attributes) != 2 {
+				t.Fatal(change)
+			}
+			return
 		}
 	}
-	if actions["remove"] != 1 || actions["add"] != 1 || actions["modify"] != 0 {
-		t.Fatal(actions)
-	}
+	t.Fatal("missing metric before/after")
 }
-func TestReportShowsEveryRemovedMetric(t *testing.T) {
-	before := sampleContract()
-	before.Metrics = append(before.Metrics, Metric{Package: "p", Name: "latency", Instrument: "Float64Histogram", Unit: "s", Attributes: []Attribute{}})
-	after := Contract{Version: 1, Metrics: []Metric{}, Attributes: []Attribute{}}
-	_, report := compareContracts(before, after)
-	for _, want := range []string{"| 0 | 2 | 0 | 1 |", "## Removed metric: requests", "## Removed metric: latency", "| Instrument | Float64Histogram | — |", "| Unit | s | — |", "| Removed | status | string | — |"} {
-		if !strings.Contains(string(report), want) {
-			t.Fatalf("missing %q in %s", want, report)
-		}
-	}
-	if strings.Contains(string(report), "Other attribute declarations") {
-		t.Fatal("removed attribute duplicated", string(report))
-	}
-}
+
 func TestChangedReportsAreDeterministic(t *testing.T) {
 	before, after := sampleContract(), sampleContract()
 	after.Metrics[0].Attributes = append(after.Metrics[0].Attributes, Attribute{"new", "string"})
@@ -302,41 +265,25 @@ func TestChangedReportsAreDeterministic(t *testing.T) {
 		}
 	}
 }
-func TestReportCannotInjectMarkdownRowsOrLinks(t *testing.T) {
+func TestSummaryDoesNotRenderUntrustedSourceText(t *testing.T) {
 	before, after := sampleContract(), sampleContract()
 	after.Metrics[0].Name = "evil|name\n## forged [click](https://evil.example)"
 	after.Metrics[0].Unit = "</table><script>bad</script>"
 	after.Metrics[0].Attributes = append(after.Metrics[0].Attributes, Attribute{"key|`name\r\n@reviewer", "string"})
-	delta, report := compareContracts(before, after)
-	for _, bad := range []string{"<script>", "\n## forged", "[click](https://evil.example)", "key|`name", "\r", "@reviewer"} {
-		if strings.Contains(string(report), bad) && bad != "@reviewer" {
-			t.Fatalf("unescaped %q: %s", bad, report)
-		}
-	}
-	for _, want := range []string{"&lt;script&gt;", `evil\|name`, `\[click\]\(https\://evil.example\)`, `key\|\` + "`" + `name`, `\@reviewer`} {
-		if !strings.Contains(string(report), want) {
-			t.Fatalf("missing escaped %q in %s", want, report)
-		}
-	}
-	short, full := reviewOutputs(before, after, delta)
-	if strings.ContainsAny(short, "\r\n") || bytes.Contains(full, []byte("\n## forged")) {
-		t.Fatalf("unsanitized summary %q / %s", short, full)
-	}
-}
-func TestReviewSummariesAreBoundedAndTruncationIsExplicit(t *testing.T) {
-	before, after := sampleContract(), sampleContract()
 	for i := 0; i < 180; i++ {
 		after.Metrics[0].Attributes = append(after.Metrics[0].Attributes, Attribute{fmt.Sprintf("attribute.%03d.שלום", i), "string"})
 	}
 	delta, report := compareContracts(before, after)
-	short, full := reviewOutputs(before, after, delta)
-	if len([]rune(short)) > 180 || len([]rune(string(full))) > 3000 {
-		t.Fatalf("oversized summaries: %d/%d", len([]rune(short)), len([]rune(string(full))))
+	for _, bad := range []string{"evil", "script", "@reviewer", "attribute.179"} {
+		if bytes.Contains(report, []byte(bad)) {
+			t.Fatal("source leaked into summary:", string(report))
+		}
 	}
-	if !strings.HasSuffix(short, "… see report") || !bytes.Contains(full, []byte("Truncated; see report.md and delta.json for all changes.")) {
-		t.Fatalf("silent truncation: %q / %s", short, full)
+	if len(report) > 1000 || !bytes.Contains(report, []byte("delta.json")) || !bytes.Contains(report, []byte("PR review comment")) {
+		t.Fatal("summary missing full-diff references or unexpectedly large:", string(report))
 	}
-	if !bytes.Contains(report, []byte("attribute.179.שלום")) || bytes.Contains(report, []byte("Truncated")) {
-		t.Fatal("full Markdown report was truncated")
+	data, err := jsonBytes(delta)
+	if err != nil || !bytes.Contains(data, []byte("attribute.179.שלום")) {
+		t.Fatal("structured delta lost data", err)
 	}
 }

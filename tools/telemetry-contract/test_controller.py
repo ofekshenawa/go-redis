@@ -1,22 +1,19 @@
 import copy
 import hashlib
-import io
 import json
 from pathlib import Path
 import tempfile
 import unittest
 from unittest.mock import patch
-from urllib.error import HTTPError
-import zipfile
 
 import controller
 from gate import Rejected
 
 
 class API:
-    def __init__(self, responses, archive):
+    def __init__(self, responses, files):
         self.responses = responses
-        self.archive = archive
+        self.files = files
         self.writes = []
         self.downloads = []
 
@@ -43,17 +40,12 @@ class API:
         self.responses[path].update(copy.deepcopy(data))
         return copy.deepcopy(self.responses[path])
 
-    def artifact(self, prefix, artifact_id):
-        self.downloads.append((prefix, artifact_id))
-        return self.archive
-
-
-def zipped(files):
-    stream = io.BytesIO()
-    with zipfile.ZipFile(stream, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-        for name, data in files.items():
-            archive.writestr(name, data)
-    return stream.getvalue()
+    def download(self, repository, source_id, name, destination):
+        self.downloads.append((repository, source_id, name))
+        for name, data in self.files.items():
+            path = destination / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(data)
 
 
 class ControllerTests(unittest.TestCase):
@@ -105,7 +97,7 @@ class ControllerTests(unittest.TestCase):
         self.manifest.update(report_sha256=hashlib.sha256(report).hexdigest(), delta_sha256=hashlib.sha256(delta).hexdigest())
         self.files = {"manifest.json": json.dumps(self.manifest).encode(), "delta.json": delta,
                       "report.md": report, "base.json": b"{}", "candidate.json": b"{}", "review.txt": b"retries"}
-        self.api = API(self.responses, zipped(self.files))
+        self.api = API(self.responses, self.files)
 
     def prepare(self):
         return controller.prepare(123, self.state_dir, self.env, self.api)
@@ -126,7 +118,7 @@ class ControllerTests(unittest.TestCase):
         self.assertEqual("a" * 40, self.check()["head_sha"])
         self.assertIn("actions/runs/456", self.comment()["body"])
         self.assertIn("Waiting for telemetry approval", self.comment()["body"])
-        self.assertEqual([(self.prefix, 300)], self.api.downloads)
+        self.assertEqual([("owner/repo", 123, "telemetry-report-123-1")], self.api.downloads)
         self.assertIn("has_changes=true", (self.root / "outputs").read_text())
 
     def test_nonfork_source_association_is_checked_and_passes(self):
@@ -198,16 +190,24 @@ class ControllerTests(unittest.TestCase):
                 self.prepare()
             self.artifact[key] = original
 
-    def test_zip_traversal_and_unexpected_files_are_rejected(self):
-        for name in ("../escape.py", "folder/report.md", "code.py"):
-            self.api.archive = zipped(dict(self.files, **{name: b"not executable"}))
+    def test_downloaded_unexpected_or_nested_files_are_rejected(self):
+        for name in ("folder/report.md", "code.py"):
+            self.api.files = dict(self.files, **{name: b"not executable"})
             with self.subTest(name=name), self.assertRaisesRegex(Rejected, "unexpected files"):
                 self.prepare()
-        self.assertFalse((self.root / "escape.py").exists())
 
-    def test_zip_uncompressed_limit_is_enforced(self):
+    def test_downloaded_symlinks_are_rejected(self):
+        def download(repository, source_id, name, destination):
+            for name, data in self.files.items():
+                (destination / name).write_bytes(data)
+            (destination / "base.json").unlink()
+            (destination / "base.json").symlink_to(destination / "candidate.json")
+        self.api.download = download
+        with self.assertRaisesRegex(Rejected, "flat data files"):
+            self.prepare()
+
+    def test_uncompressed_limit_is_enforced(self):
         self.files["base.json"] = b"x" * 2048
-        self.api.archive = zipped(self.files)
         self.artifact["size_in_bytes"] = 100
         with patch.object(controller, "MAX_BYTES", 1500):
             with self.assertRaisesRegex(Rejected, "Uncompressed artifact"):
@@ -215,7 +215,6 @@ class ControllerTests(unittest.TestCase):
 
     def test_report_hash_mismatch_fails_before_comment(self):
         self.files["report.md"] = b"forged report"
-        self.api.archive = zipped(self.files)
         with self.assertRaisesRegex(Rejected, "report hash"):
             self.prepare()
         self.assertNotIn(self.prefix + "/issues/comments/200", self.responses)
@@ -342,28 +341,6 @@ class ControllerTests(unittest.TestCase):
         comments = [item for item in self.api.writes if item[0] == "POST" and item[1].endswith("/comments")]
         self.assertEqual(1, len(comments))
 
-    def test_artifact_redirect_never_forwards_token(self):
-        class Response:
-            def __enter__(self):
-                return self
-            def __exit__(self, *args):
-                pass
-            def read(self, limit):
-                return b"zip-data"
-
-        requests = []
-        class Opener:
-            def open(self, request, timeout):
-                requests.append(request)
-                if len(requests) == 1:
-                    raise HTTPError(request.full_url, 302, "Found", {"Location": "https://blob.example/signed?sig=secret"}, None)
-                return Response()
-
-        api = controller.GitHub("test-token")
-        api.opener = Opener()
-        self.assertEqual(b"zip-data", api.artifact(self.prefix, 300))
-        self.assertEqual("Bearer test-token", requests[0].get_header("Authorization"))
-        self.assertIsNone(requests[1].get_header("Authorization"))
 
 
 if __name__ == "__main__":

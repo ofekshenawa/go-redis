@@ -1,22 +1,13 @@
 #!/usr/bin/env python3
-"""Final, trusted gate for the telemetry Environment demo (standard library only).
+"""Shared report/reviewer validation and a small adapter for the GitHub CLI."""
 
-This process never executes PR code. Its manifest and artifacts must come from the
-successful comparison job in this workflow run, using immutable Actions artifacts.
-GitHub's review history does not identify a run attempt, so reruns fail closed:
-start a fresh workflow run after changing the PR or its target branch instead.
-"""
-
-import argparse
 import hashlib
 import json
 import os
 from pathlib import Path
 import re
-import sys
-from urllib.error import HTTPError, URLError
+import subprocess
 from urllib.parse import quote
-from urllib.request import Request, urlopen
 
 
 ENVIRONMENT = "telemetry-review"
@@ -54,26 +45,43 @@ def json_file(path):
 
 
 class GitHub:
+    """Delegate API authentication, HTTP and artifact downloads to GitHub CLI."""
     def __init__(self, token):
         require(bool(token), "GITHUB_TOKEN is required.")
-        self.token = token
+        self.env = dict(os.environ, GH_TOKEN=token, GH_HOST="github.com", GH_PROMPT_DISABLED="1")
+
+    def run(self, *args, data=None):
+        try:
+            result = subprocess.run(["gh", *args], input=data, text=True, capture_output=True,
+                                    env=self.env, timeout=120, check=True)
+            return result.stdout
+        except (subprocess.SubprocessError, OSError):
+            # CLI stderr may include response data; do not expose it in the Check.
+            raise Rejected("GitHub CLI request failed or timed out.") from None
+
+    def request(self, method, path, data=None):
+        require(path.startswith("/repos/") and not path.startswith("//"), "Invalid API path.")
+        args = ["api", "--hostname", "github.com", "--method", method, path,
+                "-H", "X-GitHub-Api-Version: 2022-11-28"]
+        if data is not None:
+            args.extend(["--input", "-"])
+        try:
+            return json.loads(self.run(*args, data=None if data is None else json.dumps(data)))
+        except ValueError:
+            raise Rejected("Invalid GitHub API response.") from None
 
     def get(self, path):
-        # The API origin is fixed; artifact contents cannot redirect credentials.
-        request = Request("https://api.github.com" + path, headers={
-            "Authorization": "Bearer " + self.token,
-            "Accept": "application/vnd.github+json",
-            "X-GitHub-Api-Version": "2022-11-28",
-            "User-Agent": "telemetry-environment-demo",
-        })
-        try:
-            with urlopen(request, timeout=30) as response:
-                return json.load(response)
-        except HTTPError as exc:
-            raise Rejected(f"GitHub verification failed (HTTP {exc.code}).") from None
-        except (URLError, OSError, ValueError):
-            # Never include response bodies, authorization headers, or raw errors.
-            raise Rejected("GitHub verification was unavailable or invalid.") from None
+        return self.request("GET", path)
+
+    def post(self, path, data):
+        return self.request("POST", path, data)
+
+    def patch(self, path, data):
+        return self.request("PATCH", path, data)
+
+    def download(self, repository, source_id, name, destination):
+        self.run("run", "download", str(source_id), "--repo", "github.com/" + repository,
+                 "--name", name, "--dir", str(destination))
 
 
 def validate_artifacts(manifest_path, delta_path, report_path, env):
@@ -175,38 +183,3 @@ def approved_reviewer(api, prefix, run_id):
                 and actor.get("id") == identity and actor.get("login") == login):
             return login
     raise Rejected("This run has no telemetry-review approval from a repository admin or maintainer.")
-
-
-def check(manifest_path, delta_path, report_path, collection_result, approval_result, env, api):
-    require(collection_result == "success", "Telemetry collection/comparison did not succeed.")
-    manifest, delta = validate_artifacts(manifest_path, delta_path, report_path, env)
-    prefix = "/repos/" + manifest["repository"]
-    current_candidate(api, prefix, manifest)
-    if not delta["has_changes"]:
-        require(approval_result == "skipped", "Unexpected approval job state for an unchanged contract.")
-        return "Telemetry contract is unchanged; no approval is required."
-    require(approval_result == "success", "Telemetry changes have not completed the approval job.")
-    reviewer = approved_reviewer(api, prefix, manifest["run_id"])
-    # Narrow the window in which a commit/retarget can race a reviewer lookup.
-    # Strict up-to-date branch protection is still required at merge time.
-    current_candidate(api, prefix, manifest)
-    return f"Telemetry changes approved for this run by {reviewer}."
-
-
-def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    for name in ("manifest", "delta", "report", "collection-result", "approval-result"):
-        parser.add_argument("--" + name, required=True)
-    args = parser.parse_args()
-    try:
-        message = check(args.manifest, args.delta, args.report, args.collection_result,
-                        args.approval_result, os.environ, GitHub(os.environ.get("GITHUB_TOKEN")))
-    except Rejected as exc:
-        print(f"Telemetry gate blocked: {exc}", file=sys.stderr)
-        return 1
-    print(message)
-    return 0
-
-
-if __name__ == "__main__":
-    sys.exit(main())

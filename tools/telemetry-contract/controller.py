@@ -2,19 +2,14 @@
 """Trusted workflow_run controller; untrusted collection artifacts are data only."""
 
 import argparse
-import io
 import json
 import os
 from pathlib import Path
-import stat
 import sys
-from urllib.error import HTTPError, URLError
-from urllib.parse import urlsplit
-from urllib.request import HTTPRedirectHandler, Request, build_opener
-import zipfile
+import tempfile
 
 from comment_report import comment_marker, render_comment
-from gate import Rejected, approved_reviewer, current_candidate, number, require, sha, validate_artifacts
+from gate import GitHub, Rejected, approved_reviewer, current_candidate, number, require, sha, validate_artifacts
 
 
 WORKFLOW = ".github/workflows/telemetry-contract.yml"
@@ -22,76 +17,6 @@ MAX_BYTES = 20 * 1024 * 1024
 REQUIRED_FILES = {"manifest.json", "delta.json", "report.md"}
 ALLOWED_FILES = REQUIRED_FILES | {"base.json", "candidate.json", "review.txt"}
 CHECK_APP_ID = 15368  # GitHub Actions on github.com.
-
-
-class NoRedirect(HTTPRedirectHandler):
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
-        return None
-
-
-class GitHub:
-    """Fixed API origin; artifact redirect uses a separate unauthenticated request."""
-    def __init__(self, token):
-        require(bool(token), "GITHUB_TOKEN is required.")
-        self.token = token
-        self.opener = build_opener(NoRedirect)
-
-    def request(self, method, path, data=None):
-        require(path.startswith("/repos/") and not path.startswith("//"), "Invalid API path.")
-        request = Request("https://api.github.com" + path, method=method,
-                          data=None if data is None else json.dumps(data).encode(), headers={
-            "Authorization": "Bearer " + self.token,
-            "Accept": "application/vnd.github+json",
-            "Content-Type": "application/json",
-            "X-GitHub-Api-Version": "2022-11-28",
-            "User-Agent": "telemetry-environment-controller",
-        })
-        try:
-            with self.opener.open(request, timeout=30) as response:
-                raw = response.read(MAX_BYTES + 1)
-                require(len(raw) <= MAX_BYTES, "GitHub response exceeds the size limit.")
-                return json.loads(raw)
-        except HTTPError as exc:
-            raise Rejected(f"GitHub verification failed (HTTP {exc.code}).") from None
-        except (URLError, OSError, ValueError):
-            raise Rejected("GitHub verification was unavailable or invalid.") from None
-
-    def get(self, path):
-        return self.request("GET", path)
-
-    def post(self, path, data):
-        return self.request("POST", path, data)
-
-    def patch(self, path, data):
-        return self.request("PATCH", path, data)
-
-    def artifact(self, prefix, artifact_id):
-        path = f"{prefix}/actions/artifacts/{number(artifact_id, 'artifact ID')}/zip"
-        request = Request("https://api.github.com" + path, headers={
-            "Authorization": "Bearer " + self.token,
-            "Accept": "application/vnd.github+json",
-            "X-GitHub-Api-Version": "2022-11-28",
-        })
-        try:
-            try:
-                with self.opener.open(request, timeout=30):
-                    raise Rejected("Artifact download did not return a signed redirect.")
-            except HTTPError as exc:
-                try:
-                    require(exc.code == 302, "Artifact download is unavailable.")
-                    location = exc.headers.get("Location", "")
-                finally:
-                    exc.close()
-            target = urlsplit(location)
-            require(target.scheme == "https" and target.hostname and not target.username
-                    and not target.password, "Invalid artifact download redirect.")
-            # No Authorization, no inherited request headers, no further redirects.
-            with self.opener.open(Request(location), timeout=60) as response:
-                data = response.read(MAX_BYTES + 1)
-            require(len(data) <= MAX_BYTES, "Artifact exceeds the size limit.")
-            return data
-        except (HTTPError, URLError, OSError, ValueError):
-            raise Rejected("Artifact download was unavailable or invalid.") from None
 
 
 def identity(env):
@@ -170,25 +95,21 @@ def read_artifact(api, prefix, source, state_dir):
     require(artifact.get("workflow_run", {}).get("id") == source["id"]
             and artifact.get("workflow_run", {}).get("head_sha") == source["head_sha"],
             "Artifact is not bound to the expected collection run and head.")
-    archive = api.artifact(prefix, artifact["id"])
-    require(len(archive) <= MAX_BYTES, "Artifact exceeds the size limit.")
-    try:
-        with zipfile.ZipFile(io.BytesIO(archive)) as zipped:
-            infos = zipped.infolist()
-            names = [info.filename for info in infos]
-            require(len(names) == len(set(names)) and set(names) <= ALLOWED_FILES
-                    and REQUIRED_FILES <= set(names), "Artifact contains missing, duplicate or unexpected files.")
-            require(sum(info.file_size for info in infos) <= MAX_BYTES,
-                    "Uncompressed artifact exceeds the size limit.")
-            for info in infos:
-                require(not info.is_dir() and not stat.S_ISLNK(info.external_attr >> 16),
-                        "Artifact may contain data files only.")
-            state_dir.mkdir(parents=True, exist_ok=True)
-            # Never extract paths or execute artifact content.
-            for name in REQUIRED_FILES:
-                (state_dir / name).write_bytes(zipped.read(name))
-    except (zipfile.BadZipFile, RuntimeError, OSError):
-        raise Rejected("Collection artifact is not a readable data archive.") from None
+    # GitHub CLI owns redirect handling and safe ZIP extraction. Use an isolated
+    # temp directory: downloaded files never overwrite trusted code or state.
+    with tempfile.TemporaryDirectory(prefix="telemetry-report-", dir=os.environ.get("RUNNER_TEMP")) as temporary:
+        root = Path(temporary)
+        api.download(prefix.removeprefix("/repos/"), source["id"], expected, root)
+        files = list(root.iterdir())
+        require(REQUIRED_FILES <= {p.name for p in files} <= ALLOWED_FILES,
+                "Artifact contains missing or unexpected files.")
+        require(all(p.is_file() and not p.is_symlink() for p in files),
+                "Artifact may contain flat data files only.")
+        require(sum(p.stat().st_size for p in files) <= MAX_BYTES,
+                "Uncompressed artifact exceeds the size limit.")
+        state_dir.mkdir(parents=True, exist_ok=True)
+        for name in REQUIRED_FILES:
+            (state_dir / name).write_bytes((root / name).read_bytes())
 
 
 def validate_context(api, prefix, state, state_dir, source):
