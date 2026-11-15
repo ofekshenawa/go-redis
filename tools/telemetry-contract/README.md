@@ -35,8 +35,12 @@ Demo PRs target that branch. In production the same files live on `master`.
 
 1. Open the no-change PR's **Telemetry contract** run. The report says unchanged,
    the approval job is skipped, and `telemetry-contract` succeeds automatically.
-2. Open the metric-change PR's run. Read the diff in the completed comparison
-   job's summary. The run is **Waiting** and exposes **Review deployments**.
+2. Open the metric-change PR's run. The waiting job is named after the actual
+   change (for example `Approve telemetry: + metric …; attrs +demo.phase`). A
+   **Telemetry changes to approve** notice shows the change on the run overview,
+   alongside a link to this run's full report artifact. The comparison job's
+   summary contains a metric/attribute table, including instrument and unit.
+   The run is **Waiting** and exposes **Review deployments**.
 3. Select `telemetry-review`, then **Approve and deploy**. Nothing is deployed.
    The final job confirms the reviewer's role and that base/head are still current,
    then passes without another source commit.
@@ -49,6 +53,14 @@ Demo PRs target that branch. In production the same files live on `master`.
 `telemetry-review` has `@ofekshenawa` as its required reviewer. The demo permits
 self-approval because it is a single-user repository; the API still requires the
 reviewer to be admin/maintain. Admin bypass is disabled. No secrets are needed.
+
+GitHub's native approval popup only lists the Environment; it has no custom
+report body. Read the change on the run page before opening that popup. The
+report compares the **whole PR against its target branch**, including changes
+from earlier commits. Job names are short previews; an explicit `see report`
+suffix indicates truncation. `review.txt`, `report.md` and `delta.json` in the
+linked artifact provide progressively more detail. Notices and job titles need
+no write token or PR comments, including for fork-origin workflows.
 
 ## GitHub setup and trust boundary
 
