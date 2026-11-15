@@ -1,0 +1,92 @@
+name: Telemetry review
+
+on:
+  workflow_run:
+    workflows: [Telemetry contract]
+    types: [completed]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: telemetry-review-${{ github.event.workflow_run.head_repository.id }}-${{ github.event.workflow_run.head_branch }}
+  cancel-in-progress: true
+
+jobs:
+  publish:
+    name: Post telemetry diff on the PR
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+      checks: write
+      pull-requests: write
+    outputs:
+      check_id: ${{ steps.publish.outputs.check_id }}
+      has_changes: ${{ steps.publish.outputs.has_changes }}
+      comment_url: ${{ steps.publish.outputs.comment_url }}
+    steps:
+      - name: Check out the trusted controller only
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+      - name: Validate collection and publish its exact diff
+        id: publish
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          SOURCE_RUN: ${{ github.event.workflow_run.id }}
+        run: python3 tools/telemetry-contract/controller.py prepare --source-run "$SOURCE_RUN" --state-dir state
+      - name: Preserve trusted review state
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: telemetry-review-state-${{ github.run_id }}-${{ github.run_attempt }}
+          path: state/
+          if-no-files-found: warn
+          retention-days: 30
+
+  review:
+    name: Approve or reject the PR telemetry diff
+    needs: publish
+    if: needs.publish.outputs.has_changes == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment:
+      name: telemetry-review
+      url: ${{ needs.publish.outputs.comment_url }}
+    steps:
+      - name: Continue after native GitHub review
+        run: echo 'Review completed. The final check validates the approver and current PR.'
+
+  final:
+    name: Finalize telemetry review
+    needs: [publish, review]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+      checks: write
+      pull-requests: write
+    steps:
+      - name: Check out the trusted controller only
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+      - name: Restore this review run's state
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: telemetry-review-state-${{ github.run_id }}-${{ github.run_attempt }}
+          path: state
+      - name: Complete the check on the PR commit
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PUBLISH_RESULT: ${{ needs.publish.result }}
+          APPROVAL_RESULT: ${{ needs.review.result }}
+        run: |
+          python3 tools/telemetry-contract/controller.py finish --state-dir state \
+            --publish-result "$PUBLISH_RESULT" --approval-result "$APPROVAL_RESULT"
