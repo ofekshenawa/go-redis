@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: telemetry-review-${{ github.event.workflow_run.head_repository.id }}-${{ github.event.workflow_run.head_branch }}
+  group: telemetry-review-${{ github.event.workflow_run.id }}
   cancel-in-progress: true
 
 jobs:
