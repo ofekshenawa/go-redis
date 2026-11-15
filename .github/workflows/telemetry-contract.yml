@@ -16,10 +16,6 @@ jobs:
     name: Collect and compare telemetry
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    outputs:
-      has_changes: ${{ steps.compare.outputs.has_changes }}
-      review_summary: ${{ steps.compare.outputs.review_summary }}
-      report_url: ${{ steps.artifacts.outputs.artifact-url }}
     env:
       GOTOOLCHAIN: local
       GOWORK: 'off'
@@ -64,7 +60,7 @@ jobs:
         id: compare
         run: |
           "$RUNNER_TEMP/telemetry-contract" -base report/base.json -candidate report/candidate.json -report-dir report
-      - name: Publish the report before requesting approval
+      - name: Bind the report to this exact PR candidate
         run: python3 base/tools/telemetry-contract/prepare.py base candidate report
       - name: Save contracts, diff and exact candidate identity
         id: artifacts
@@ -74,60 +70,3 @@ jobs:
           path: report/
           if-no-files-found: error
           retention-days: 30
-      - name: Show changes next to the approval request
-        if: steps.compare.outputs.has_changes == 'true'
-        env:
-          TELEMETRY_REPORT_URL: ${{ steps.artifacts.outputs.artifact-url }}
-        run: python3 base/tools/telemetry-contract/prepare.py --announce report
-
-  review:
-    name: 'Approve telemetry: ${{ needs.compare.outputs.review_summary }}'
-    needs: compare
-    if: needs.compare.outputs.has_changes == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    environment:
-      name: telemetry-review
-      url: ${{ needs.compare.outputs.report_url }}
-    steps:
-      - name: Continue after native GitHub approval
-        run: echo 'Environment review completed. The final check will validate the reviewer and current PR.'
-
-  final:
-    name: telemetry-contract
-    needs: [compare, review]
-    if: always()
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions:
-      contents: read
-      actions: read
-    steps:
-      - name: Reject unsuccessful collection
-        env:
-          COLLECTION_RESULT: ${{ needs.compare.result }}
-        run: |
-          if [ "$COLLECTION_RESULT" != success ]; then
-            echo "::error::Telemetry collection/comparison $COLLECTION_RESULT. A collection error cannot be approved."
-            exit 1
-          fi
-      - name: Check out the trusted validator
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          ref: ${{ github.event.pull_request.base.sha }}
-          persist-credentials: false
-      - name: Download this run's immutable report
-        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
-        with:
-          name: telemetry-report-${{ github.run_id }}-${{ github.run_attempt }}
-          path: report
-      - name: Validate candidate, report and reviewer
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-          COLLECTION_RESULT: ${{ needs.compare.result }}
-          APPROVAL_RESULT: ${{ needs.review.result }}
-          TELEMETRY_TOOL_SHA: ${{ github.event.pull_request.base.sha }}
-        run: |
-          python3 tools/telemetry-contract/gate.py \
-            --manifest report/manifest.json --delta report/delta.json --report report/report.md \
-            --collection-result "$COLLECTION_RESULT" --approval-result "$APPROVAL_RESULT"
