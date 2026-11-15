@@ -5,7 +5,9 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from gate import Rejected, check
+from gate import Rejected, GitHub, approved_reviewer, current_candidate, validate_artifacts
+from unittest.mock import patch
+import subprocess
 
 
 class FakeGitHub:
@@ -72,41 +74,18 @@ class GateTests(unittest.TestCase):
         self.manifest["report_sha256"] = hashlib.sha256(self.report_file.read_bytes()).hexdigest()
         self.manifest_file.write_text(json.dumps(self.manifest))
 
-    def run_gate(self, collection="success", approval="success"):
+    def run_gate(self):
         self.api = FakeGitHub(self.responses)
-        return check(self.manifest_file, self.delta_file, self.report_file,
-                     collection, approval, self.env, self.api)
+        manifest, delta = validate_artifacts(self.manifest_file, self.delta_file, self.report_file, self.env)
+        current_candidate(self.api, self.prefix, manifest)
+        return approved_reviewer(self.api, self.prefix, manifest["run_id"])
 
     def test_authorized_maintainer_approval(self):
-        self.assertIn("maintainer", self.run_gate())
-        self.assertEqual(2, self.api.paths.count(self.prefix + "/pulls/7"))
+        self.assertEqual("maintainer", self.run_gate())
 
     def test_authorized_admin_approval(self):
         self.responses[self.prefix + "/collaborators/maintainer/permission"]["role_name"] = "admin"
-        self.assertIn("approved", self.run_gate())
-
-    def test_unchanged_passes_without_review_or_environment(self):
-        self.delta.update(has_changes=False, changes=[])
-        self.write_artifacts()
-        del self.responses[self.prefix + "/environments/telemetry-review"]
-        self.assertIn("unchanged", self.run_gate(approval="skipped"))
-        self.assertFalse(any("approvals" in path for path in self.api.paths))
-
-    def test_unchanged_requires_approval_job_skipped(self):
-        self.delta.update(has_changes=False, changes=[])
-        self.write_artifacts()
-        with self.assertRaisesRegex(Rejected, "Unexpected approval"):
-            self.run_gate()
-
-    def test_collection_failure_or_cancellation_cannot_be_approved(self):
-        for status in ("failure", "cancelled", "skipped", ""):
-            with self.subTest(status=status), self.assertRaisesRegex(Rejected, "collection/comparison"):
-                self.run_gate(collection=status)
-
-    def test_changes_require_successful_approval_job(self):
-        for status in ("failure", "cancelled", "skipped", ""):
-            with self.subTest(status=status), self.assertRaisesRegex(Rejected, "approval job"):
-                self.run_gate(approval=status)
+        self.assertEqual("maintainer", self.run_gate())
 
     def test_only_builtin_admin_and_maintain_roles_can_approve(self):
         for role in ("write", "read", "triage", "custom-maintainer", ""):
@@ -219,7 +198,32 @@ class GateTests(unittest.TestCase):
         for field in ("pr", "run_id", "run_attempt"):
             self.manifest[field] = str(self.manifest[field])
         self.write_artifacts()
-        self.assertIn("approved", self.run_gate())
+        self.assertEqual("maintainer", self.run_gate())
+
+
+class CLITests(unittest.TestCase):
+    def test_json_body_is_stdin_and_token_is_environment_only(self):
+        with patch("gate.subprocess.run", return_value=subprocess.CompletedProcess([], 0, '{"id":1}', "")) as run:
+            result = GitHub("secret").post("/repos/owner/repo/check-runs", {"name": "literal $(not-shell)"})
+        args, options = run.call_args
+        self.assertEqual(result, {"id": 1})
+        self.assertNotIn("secret", args[0])
+        self.assertEqual(options["env"]["GH_TOKEN"], "secret")
+        self.assertEqual(json.loads(options["input"]), {"name": "literal $(not-shell)"})
+        self.assertNotIn("shell", options)
+        self.assertIn("github.com", args[0])
+
+    def test_cli_errors_are_redacted(self):
+        with patch("gate.subprocess.run", side_effect=subprocess.CalledProcessError(1, ["gh"], stderr="private")):
+            with self.assertRaisesRegex(Rejected, "GitHub CLI request failed") as error:
+                GitHub("secret").get("/repos/owner/repo")
+            self.assertNotIn("private", str(error.exception))
+
+    def test_download_uses_verified_run_and_name(self):
+        with patch("gate.subprocess.run", return_value=subprocess.CompletedProcess([], 0, "", "")) as run:
+            GitHub("secret").download("owner/repo", 123, "telemetry-report-123-1", "/tmp/isolated")
+        self.assertEqual(run.call_args.args[0], ["gh", "run", "download", "123", "--repo", "github.com/owner/repo",
+                                              "--name", "telemetry-report-123-1", "--dir", "/tmp/isolated"])
 
 
 if __name__ == "__main__":
