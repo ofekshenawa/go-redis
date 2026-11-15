@@ -71,6 +71,7 @@ func runCLI(args []string, stdout io.Writer, githubOutput string) error {
 			return fmt.Errorf("candidate: %w", err)
 		}
 		delta, report := compareContracts(before, after)
+		reviewSummary, reviewText := reviewOutputs(before, after, delta)
 		deltaData, err := jsonBytes(delta)
 		if err != nil {
 			return err
@@ -84,12 +85,15 @@ func runCLI(args []string, stdout io.Writer, githubOutput string) error {
 		if err = os.WriteFile(filepath.Join(*reportDir, "report.md"), report, 0644); err != nil {
 			return err
 		}
+		if err = os.WriteFile(filepath.Join(*reportDir, "review.txt"), reviewText, 0644); err != nil {
+			return err
+		}
 		if githubOutput != "" {
 			file, err := os.OpenFile(githubOutput, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0644)
 			if err != nil {
 				return err
 			}
-			_, writeErr := fmt.Fprintf(file, "has_changes=%t\nreport_sha256=%x\ndelta_sha256=%x\n", delta.HasChanges, sha256.Sum256(report), sha256.Sum256(deltaData))
+			_, writeErr := fmt.Fprintf(file, "has_changes=%t\nreport_sha256=%x\ndelta_sha256=%x\nreview_summary=%s\n", delta.HasChanges, sha256.Sum256(report), sha256.Sum256(deltaData), reviewSummary)
 			closeErr := file.Close()
 			if writeErr != nil {
 				return writeErr
