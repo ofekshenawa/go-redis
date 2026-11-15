@@ -10,7 +10,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"sort"
 )
 
 type Attribute struct {
@@ -71,7 +70,6 @@ func runCLI(args []string, stdout io.Writer, githubOutput string) error {
 			return fmt.Errorf("candidate: %w", err)
 		}
 		delta, report := compareContracts(before, after)
-		reviewSummary, reviewText := reviewOutputs(before, after, delta)
 		deltaData, err := jsonBytes(delta)
 		if err != nil {
 			return err
@@ -85,15 +83,12 @@ func runCLI(args []string, stdout io.Writer, githubOutput string) error {
 		if err = os.WriteFile(filepath.Join(*reportDir, "report.md"), report, 0644); err != nil {
 			return err
 		}
-		if err = os.WriteFile(filepath.Join(*reportDir, "review.txt"), reviewText, 0644); err != nil {
-			return err
-		}
 		if githubOutput != "" {
 			file, err := os.OpenFile(githubOutput, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0644)
 			if err != nil {
 				return err
 			}
-			_, writeErr := fmt.Fprintf(file, "has_changes=%t\nreport_sha256=%x\ndelta_sha256=%x\nreview_summary=%s\n", delta.HasChanges, sha256.Sum256(report), sha256.Sum256(deltaData), reviewSummary)
+			_, writeErr := fmt.Fprintf(file, "has_changes=%t\nreport_sha256=%x\ndelta_sha256=%x\n", delta.HasChanges, sha256.Sum256(report), sha256.Sum256(deltaData))
 			closeErr := file.Close()
 			if writeErr != nil {
 				return writeErr
@@ -132,40 +127,4 @@ func runCLI(args []string, stdout io.Writer, githubOutput string) error {
 
 func metricID(m Metric) string {
 	return m.Package + " / " + m.Name + " [" + m.Instrument + ", unit=" + m.Unit + "]"
-}
-func describe(before, after Contract) []string {
-	rows := func(c Contract) map[string]string {
-		out := map[string]string{}
-		for _, m := range c.Metrics {
-			id := metricID(m)
-			out["metric: "+id] = ""
-			for _, a := range m.Attributes {
-				out["attribute: "+id+" / "+a.Name+" ("+a.Type+")"] = ""
-			}
-			if m.ExternalAttributes {
-				out["caller-provided attributes: "+id] = ""
-			}
-		}
-		for _, a := range c.Attributes {
-			out["attribute declaration: "+a.Name+" ("+a.Type+")"] = ""
-		}
-		return out
-	}
-	a, b := rows(before), rows(after)
-	var lines []string
-	for k := range a {
-		if _, ok := b[k]; !ok {
-			lines = append(lines, "- "+k)
-		}
-	}
-	for k := range b {
-		if _, ok := a[k]; !ok {
-			lines = append(lines, "+ "+k)
-		}
-	}
-	sort.Strings(lines)
-	if len(lines) == 0 {
-		lines = append(lines, "No telemetry contract changes.")
-	}
-	return lines
 }

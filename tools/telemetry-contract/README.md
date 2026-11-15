@@ -85,7 +85,8 @@ comments state explicitly when truncated and link to the full source artifacts.
   Its `workflow_run: completed` publisher has only the read permissions needed
   for evidence plus Checks/PR-comment write permissions. It never checks out or
   executes PR code, scripts from artifacts, or a publisher supplied by a PR.
-  ZIP artifacts are read as bounded data with an explicit filename allowlist.
+  GitHub CLI downloads artifacts into an isolated temporary directory. Only
+  allowlisted, size-bounded data files are accepted; none are executed.
 - The controller validates the source event/repository/workflow/run/attempt,
   artifact identity and hashes, live PR/base and merge parents before publishing
   an approvable comment. The review run is distinct from the collection run;
@@ -139,9 +140,9 @@ all telemetry requires a separately reviewed coverage-policy change.
 
 - `load.go`, `scan.go`: language-specific source extraction.
 - `main.go`, `compare.go`: capture CLI, contract normalization, structured delta
-  and readable Markdown. Other clients can supply the same JSON contract.
+  and a short Markdown summary. Other clients can supply the same JSON contract.
 - `prepare.py`: binds a completed report to fixed Git commits and this fresh run.
-- `gate.py`: small standard-library GitHub API validator; no persistent state.
+- `gate.py`: shared GitHub CLI adapter and report/candidate/reviewer validation.
 - `comment_report.py`: deterministic, escaped colored-diff comment presentation.
 - `controller.py`: validate source evidence, publish/update the comment, and
   create/finalize the Check Run on the explicit PR SHA.
@@ -150,6 +151,24 @@ all telemetry requires a separately reviewed coverage-policy change.
 
 Contracts, delta, report and manifest exist only as per-run artifacts (30 days).
 The approval is available in the GitHub run's review history.
+
+## Reusing existing tools
+
+- Native GitHub Environments provide the approval/rejection gate.
+- Official `actions/upload-artifact` and `actions/download-artifact` transfer
+  report and review state between jobs.
+- [GitHub CLI](https://cli.github.com/manual/gh_api) handles authentication and
+  API requests; `gh run download` handles artifact transport and extraction.
+  The trusted review jobs require `gh`, already installed on GitHub-hosted runners.
+- `comment_report.py` is the single detailed human-readable renderer. The Go
+  comparator produces `delta.json` and a short count-only `report.md`; it no
+  longer maintains a second rich report, `review.txt`, or dynamic approval titles.
+
+The remaining custom code extracts the source contract and validates exactly
+which report, candidate and approval may turn the required check green. Replacing
+small comment/Check API calls with separate Actions would add orchestration and
+state handoffs without removing that policy. The current flow keeps those calls
+in one controller using the official CLI, rather than a custom HTTP client.
 
 ## What is collected
 
