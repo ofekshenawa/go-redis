@@ -15,5 +15,6 @@ func telemetryDemo(meter metric.Meter) {
 		metric.WithAttributes(
 			attribute.String("demo.reason", "presentation"),
 			attribute.String("demo.phase", "second-commit"),
+			attribute.Bool("demo.retryable", true),
 		))
 }
