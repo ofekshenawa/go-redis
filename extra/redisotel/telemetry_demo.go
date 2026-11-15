@@ -12,5 +12,8 @@ import (
 func telemetryDemo(meter metric.Meter) {
 	counter, _ := meter.Int64Counter("redis.client.demo.retries", metric.WithUnit("{retry}"))
 	counter.Add(context.Background(), 1,
-		metric.WithAttributes(attribute.String("demo.reason", "presentation")))
+		metric.WithAttributes(
+			attribute.String("demo.reason", "presentation"),
+			attribute.String("demo.phase", "second-commit"),
+		))
 }
