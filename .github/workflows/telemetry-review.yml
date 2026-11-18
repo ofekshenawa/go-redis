@@ -1,4 +1,4 @@
-name: Telemetry review
+name: Negative tests - telemetry review
 
 on:
   workflow_run:
@@ -20,10 +20,10 @@ jobs:
     permissions:
       contents: read
       actions: read
-      checks: write
+      statuses: write
       pull-requests: write
     outputs:
-      check_id: ${{ steps.publish.outputs.check_id }}
+      status_id: ${{ steps.publish.outputs.status_id }}
       has_changes: ${{ steps.publish.outputs.has_changes }}
       comment_url: ${{ steps.publish.outputs.comment_url }}
     steps:
@@ -69,7 +69,7 @@ jobs:
     permissions:
       contents: read
       actions: read
-      checks: write
+      statuses: write
       pull-requests: write
     steps:
       - name: Check out the trusted controller only
@@ -91,9 +91,9 @@ jobs:
           python3 tools/telemetry-contract/controller.py finish --state-dir state \
             --publish-result "$PUBLISH_RESULT" --approval-result "$APPROVAL_RESULT"
       - name: Fail closed if review finalization could not complete
-        if: (failure() || cancelled()) && needs.publish.outputs.check_id != ''
+        if: (failure() || cancelled()) && needs.publish.outputs.status_id != ''
         env:
           GITHUB_TOKEN: ${{ github.token }}
           SOURCE_RUN: ${{ github.event.workflow_run.id }}
-          CHECK_ID: ${{ needs.publish.outputs.check_id }}
-        run: python3 tools/telemetry-contract/controller.py fail --source-run "$SOURCE_RUN" --check-id "$CHECK_ID"
+          STATUS_ID: ${{ needs.publish.outputs.status_id }}
+        run: python3 tools/telemetry-contract/controller.py fail --source-run "$SOURCE_RUN" --status-id "$STATUS_ID"
