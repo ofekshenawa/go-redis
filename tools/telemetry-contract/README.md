@@ -99,6 +99,12 @@ comments state explicitly when truncated and link to the full source artifacts.
   into an unrelated workflow (such as RE Tests); commit statuses avoid that.
   Before a terminal update, the controller verifies that the latest status still
   belongs to its own run. A superseded controller cannot replace a newer result.
+- When upgrading an installation that requires the old `telemetry-contract`
+  Check Run, first install the updated review workflow on the default branch
+  and start a fresh PR run. After the new status appears, replace the required
+  context with **Negative tests / telemetry-contract**, preserving the GitHub
+  Actions source and strict up-to-date protection. Historical checks retain their
+  old grouping; the new status applies to subsequent runs.
 - The MVP does **not** implement `merge_group`. Do not disable an existing merge
   queue to install it; first implement/test that integration. An absent queue
   check must block rather than silently pass.
