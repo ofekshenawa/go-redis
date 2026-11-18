@@ -17,7 +17,7 @@ workflow_run (trusted default branch): validate source run + candidate
                         |                    telemetry-review Environment
                         \                              /
                          validate current candidate + reviewer
-                         update telemetry-contract on PR head H
+                         update Negative tests / telemetry-contract on PR head H
 ```
 
 The comparison succeeds when it finds changes; it produces `has_changes=true`.
@@ -37,11 +37,11 @@ leaving `master` untouched. Demo PRs target that branch. In production both
 workflows must be installed on the normal default branch.
 
 1. Open the no-change PR. Collection completes, the trusted review workflow skips
-   human approval, and its `telemetry-contract` Check Run on the PR head is green.
+   human approval, and its `Negative tests / telemetry-contract` commit status on the PR head is green.
 2. Open the metric-change PR's **Conversation**. A bot comment shows the exact
    source head, full PR telemetry delta in colored `diff` blocks, and the link
    **Review telemetry — approve or reject** below it.
-3. Click that link. It opens the exact **Telemetry review** run. Choose
+3. Click that link. It opens the exact **Negative tests - telemetry review** run. Choose
    **Review deployments → telemetry-review → Approve and deploy**, or **Reject**.
    Nothing is deployed. The final validator checks admin/maintain permission and
    current B/H/M, updates the PR check, and updates that comment's status.
@@ -69,7 +69,7 @@ comments state explicitly when truncated and link to the full source artifacts.
   verifies the actual approving user's `role_name` and identity.
 - Use this Environment on **exactly one job per workflow run**. Review history
   identifies the run and Environment, not an individual report or job.
-- Require check **telemetry-contract** and **branches up to date before merging**.
+- Require status **Negative tests / telemetry-contract** and **branches up to date before merging**.
   Apply this to every permitted target branch. The final API check reduces races;
   GitHub's strict branch protection handles the race after it finishes.
 - Require code-owner review for the collector, all workflows and CODEOWNERS.
@@ -83,17 +83,22 @@ comments state explicitly when truncated and link to the full source artifacts.
   Actions cache. Forks retain GitHub's workflow-run approval policy.
 - Install `.github/workflows/telemetry-review.yml` on the **default branch**.
   Its `workflow_run: completed` publisher has only the read permissions needed
-  for evidence plus Checks/PR-comment write permissions. It never checks out or
+  for evidence plus Commit-status/PR-comment write permissions. It never checks out or
   executes PR code, scripts from artifacts, or a publisher supplied by a PR.
   GitHub CLI downloads artifacts into an isolated temporary directory. Only
   allowlisted, size-bounded data files are accepted; none are executed.
 - The controller validates the source event/repository/workflow/run/attempt,
   artifact identity and hashes, live PR/base and merge parents before publishing
   an approvable comment. The review run is distinct from the collection run;
-  both identities are bound into the trusted review state and the Check Run.
-- The required check is explicitly created on the **PR head**, because native
-  `workflow_run` job checks attach to the default-branch commit. Protect its
-  source as GitHub Actions. Do not require the controller's own job names.
+  both identities are bound into the trusted review state and the commit status.
+- The required commit status is published on the **PR head**, because native
+  `workflow_run` job checks attach to the default-branch commit. Its context is
+  **Negative tests / telemetry-contract** and its Details link opens the exact
+  review run. Protect its source as GitHub Actions. Do not require the controller's
+  own job names. Custom Check Runs created with `GITHUB_TOKEN` can be grouped
+  into an unrelated workflow (such as RE Tests); commit statuses avoid that.
+  Before a terminal update, the controller verifies that the latest status still
+  belongs to its own run. A superseded controller cannot replace a newer result.
 - The MVP does **not** implement `merge_group`. Do not disable an existing merge
   queue to install it; first implement/test that integration. An absent queue
   check must block rather than silently pass.
@@ -145,7 +150,7 @@ all telemetry requires a separately reviewed coverage-policy change.
 - `gate.py`: shared GitHub CLI adapter and report/candidate/reviewer validation.
 - `comment_report.py`: deterministic, escaped colored-diff comment presentation.
 - `controller.py`: validate source evidence, publish/update the comment, and
-  create/finalize the Check Run on the explicit PR SHA.
+  publish/finalize the commit status on the explicit PR SHA.
 - `.github/workflows/telemetry-contract.yml`: unprivileged collection only.
 - `.github/workflows/telemetry-review.yml`: trusted publication → approval → final check.
 
@@ -166,7 +171,7 @@ The approval is available in the GitHub run's review history.
 
 The remaining custom code extracts the source contract and validates exactly
 which report, candidate and approval may turn the required check green. Replacing
-small comment/Check API calls with separate Actions would add orchestration and
+small comment/status API calls with separate Actions would add orchestration and
 state handoffs without removing that policy. The current flow keeps those calls
 in one controller using the official CLI, rather than a custom HTTP client.
 
