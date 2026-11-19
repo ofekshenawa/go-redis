@@ -16,12 +16,16 @@ class API:
         self.files = files
         self.writes = []
         self.downloads = []
+        self.receipts = {}
 
     def get(self, path):
         response = self.responses[path]
         if isinstance(response, Exception):
             raise response
-        return copy.deepcopy(response)
+        result = copy.deepcopy(response)
+        if "/actions/artifacts?name=" in path and isinstance(result, dict) and "artifacts" in result:
+            result.setdefault("total_count", len(result["artifacts"]))
+        return result
 
     def post(self, path, data):
         self.writes.append(("POST", path, copy.deepcopy(data)))
@@ -42,7 +46,7 @@ class API:
 
     def download(self, repository, source_id, name, destination):
         self.downloads.append((repository, source_id, name))
-        for name, data in self.files.items():
+        for name, data in self.receipts.get((source_id, name), self.files).items():
             path = destination / name
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(data)

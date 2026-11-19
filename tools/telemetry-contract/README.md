@@ -14,7 +14,8 @@ workflow_run (trusted default branch): validate source run + candidate
                         |                     post colored diff on PR
                         |                     link to this review run
                         |                              |
-                        |                    telemetry-review Environment
+                        |                   look for matching human approval
+                        |                   found → reuse; otherwise Environment
                         \                              /
                          validate current candidate + reviewer
                          update telemetry-contract on PR head H
@@ -23,7 +24,9 @@ workflow_run (trusted default branch): validate source run + candidate
 The comparison succeeds when it finds changes; it produces `has_changes=true`.
 Only the approval job waits. The final required check passes after verifying the
 current PR, the report hashes, this workflow run and an actual Environment
-approval by a repository **admin or maintainer**. Collection errors cannot be
+approval by a repository **admin or maintainer**. An identical telemetry delta
+can reuse a verified original human approval from the same PR and target.
+Collection errors cannot be
 approved. Rejection/cancellation/failure does not produce a successful final gate.
 A force-cancel can prevent the final job from running; its absent/cancelled result
 must remain merge-blocking.
@@ -45,9 +48,10 @@ workflows must be installed on the normal default branch.
    **Review deployments → telemetry-review → Approve and deploy**, or **Reject**.
    Nothing is deployed. The final validator checks admin/maintain permission and
    current B/H/M, updates the PR check, and updates that comment's status.
-4. A new commit creates a new source/report/review run and requires new approval.
-   Each report comment identifies its source head and run; an old approval cannot
-   authorize the new candidate. Comments are idempotent per source report.
+4. Push a non-telemetry commit: a fresh comparison runs, but an identical delta
+   and tool/policy context reuse the original approval. The new comment links to
+   that human approval and the Environment job is skipped. Add another attribute:
+   the new delta requires manual review. Comments are idempotent per source report.
 5. To demonstrate a moved base, advance the demo target and update/rebase the PR.
    The new run compares against the new target. Final validation rejects a stale
    candidate even if its native review was approved.
@@ -109,7 +113,8 @@ The manifest fixes B, H, M, tool revision, collection run ID/attempt and both re
 hashes. Trusted review state also binds the separate approval run and controller
 revision. The base is the actual PR target, including a parent branch for stacked
 PRs. Merge parent first, retarget the child, update it and review its new run.
-There is no dependency database or persistent approval reuse.
+There is no dependency database. A retarget conservatively requires a new manual
+approval even when the delta is unchanged; ordinary base/head SHA changes do not.
 
 A new base/head/target invalidates the old candidate. A base push alone does not
 schedule this PR workflow: update/rebase the PR or close/reopen it to start a
@@ -120,6 +125,54 @@ GitHub's approval-history API does not expose the run attempt associated with an
 approval. Therefore **Re-run jobs / Re-run all jobs are rejected in this MVP**.
 For a fresh attempt, push a new commit (an empty commit works) or reopen the PR.
 This deliberately trades convenience for unambiguous run-to-report approval.
+
+## Approval reuse without a service
+
+Every run still collects and validates the current B/H/M. `approval_reuse.py`
+hashes the canonical full delta (including each changed metric's complete
+before/after definition) and its repository, PR, target and tool/policy context.
+The context hashes Git blob IDs and file modes for the telemetry tool and both
+workflows at B, M and the trusted controller revision. It includes dependencies
+and configuration, excludes documentation/tests, and never hashes the whole
+repository SHA. Rebase/base changes outside these files can preserve approval;
+changes to relevant metric conditions, collector or gate cannot.
+The Environment ID, configured reviewer identities, self-review policy and admin
+bypass setting are also bound to the approval. Changing these requires review.
+
+When **manual** review is needed, the existing state-upload step saves its four
+data files as `telemetry-approval-<PR>-<fingerprint>`, retained for 30 days. This
+becomes reusable evidence only after explicit approval and successful completion
+of that review run. The name is only an index,
+not proof: lookup verifies the original repository, workflow event/path, immutable
+artifact/run identity, report hashes, actual code versions, explicit Environment
+approval and the approving user's current admin/maintain role. A green run without
+a human approval is never sufficient. Reused runs do not mint new approval
+artifacts or extend the original retention period.
+
+Lookup requires the complete matching history to fit within 20 records; otherwise
+it asks for manual review. It considers the newest matching artifact.
+A later manual request supersedes older approval even if rejected, cancelled or
+still waiting: the controller never falls back past that record to an older
+approval. Reused runs use ordinary run-specific state names and do not supersede
+the original human decision. Missing, expired, invalid or
+unavailable historical evidence falls back to a new manual review. An incomplete
+tool-version lookup permits manual review but does not create reusable evidence.
+The final job rechecks any selected approval and the live candidate. If evidence
+disappears or the candidate changes between publication and finalization, it
+fails closed; start a fresh run. No write permission or new service is needed
+to read evidence. Existing artifact-upload steps handle persistence.
+
+To revoke reuse, delete the original `telemetry-approval-...` artifact in GitHub
+and start a fresh run; existing completed checks are not retroactively
+revoked. Remove all matching artifacts if the intent is to require a new
+decision, since deleting the latest record can reveal an older approval.
+Normal PR review rules still apply.
+
+Install this module and the updated review workflow together on the default
+branch and relevant PR targets. Older approvals do not contain this evidence:
+the first changed run after installation needs one new manual approval. This
+isolated implementation has automated tests; native approval-to-reuse still
+requires a GitHub staging run before production adoption.
 
 ## Local commands and files
 
@@ -146,6 +199,8 @@ all telemetry requires a separately reviewed coverage-policy change.
 - `comment_report.py`: deterministic, escaped colored-diff comment presentation.
 - `controller.py`: validate source evidence, publish/update the comment, and
   create/finalize the Check Run on the explicit PR SHA.
+- `approval_reuse.py`: deterministic approval identity and original human-evidence
+  validation using GitHub APIs/artifacts; no server or database.
 - `.github/workflows/telemetry-contract.yml`: unprivileged collection only.
 - `.github/workflows/telemetry-review.yml`: trusted publication → approval → final check.
 
