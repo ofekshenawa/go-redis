@@ -10,6 +10,8 @@ MAX_COMMENT_CHARS = 59_999
 STATUSES = {
     "pending": "Waiting for telemetry approval.",
     "approved": "Telemetry approved for this run.",
+    "reusing": "Matching prior approval found; final validation pending.",
+    "reused": "Prior telemetry approval reused; the exact delta and policy are unchanged.",
     "rejected": "Telemetry review rejected for this run.",
     "stale": "This report is outdated; use the latest run before approving.",
     "cancelled": "This telemetry run was cancelled.",
@@ -209,6 +211,9 @@ def render_comment(manifest, delta, status="pending"):
               f"· **Attempt:** {manifest.get('run_attempt', 1)}\n\n")
     if approval_run != source_run:
         header += f"**Approval run:** [{approval_run}]({approval_url})\n\n"
+    if manifest.get("reused_approval_run_id"):
+        previous = _number(manifest["reused_approval_run_id"], "original approval run")
+        header += f"**Original human approval:** [{previous}](https://github.com/{repository}/actions/runs/{previous})\n\n"
     header += ("**Scope:** Full PR merge candidate versus its target base at collection time, "
                "not the previous PR commit. Unchanged metric attributes are omitted.\n\n")
     if status == "pending" and changes:
@@ -217,6 +222,7 @@ def render_comment(manifest, delta, status="pending"):
                   "then approve or reject in GitHub's native dialog. The link opens the run; it does not approve automatically.\n\n")
     else:
         footer = f"[View this telemetry run]({approval_url})\n\n"
-    footer += ("Approval applies only to this run and report. Normal PR code-review requirements still apply. "
+    footer += ("Approval covers the exact telemetry delta and tool/policy context; every new candidate is checked again. "
+               "Normal PR code-review requirements still apply. "
                "This source-level comparison does not verify runtime emission.\n")
     return _bounded(header, _body(changes), footer, source_url)
