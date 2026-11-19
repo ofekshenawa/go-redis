@@ -18,6 +18,7 @@ func TelemetryApprovalReuseDemo(meter metric.Meter) error {
 	retries.Add(context.Background(), 1, metric.WithAttributes(
 		attribute.String("demo.reason", "retry"),
 		attribute.String("demo.phase", "backoff"),
+		attribute.Bool("demo.retryable", true),
 	))
 	return nil
 }
