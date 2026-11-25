@@ -1,0 +1,75 @@
+name: Telemetry contract
+
+on:
+  pull_request:
+    # The infrastructure branch hosts the approval policy. The method PR
+    # installs the first scanner and is validated by otel-method.yml.
+    branches-ignore: [negative-tests/infrastructure]
+    types: [opened, synchronize, reopened, edited]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: telemetry-contract-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  compare:
+    name: Collect and compare telemetry
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GOTOOLCHAIN: local
+      GOWORK: 'off'
+      CGO_ENABLED: '0'
+    steps:
+      - name: Require a fresh workflow run
+        run: |
+          if [ "$GITHUB_RUN_ATTEMPT" != 1 ]; then
+            echo '::error::Re-runs are not supported. Push a new commit or reopen the PR for a fresh report and approval.'
+            exit 1
+          fi
+      - name: Check out the fixed merge candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          path: candidate
+          fetch-depth: 2
+          persist-credentials: false
+      - name: Check out the fixed base and trusted collector
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: base
+          persist-credentials: false
+      - name: Install the collector's Go version
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: base/tools/telemetry-contract/go.mod
+          cache: false
+      - name: Test and build the trusted collector
+        working-directory: base/tools/telemetry-contract
+        run: |
+          go test ./...
+          python3 -m unittest discover -v -p 'test_*.py'
+          go build -o "$RUNNER_TEMP/telemetry-contract" .
+      - name: Extract source contracts without executing client code
+        run: |
+          mkdir -p report
+          "$RUNNER_TEMP/telemetry-contract" -root "$GITHUB_WORKSPACE/base" -output report/base.json
+          "$RUNNER_TEMP/telemetry-contract" -root "$GITHUB_WORKSPACE/candidate" -output report/candidate.json
+      - name: Compare contracts
+        id: compare
+        run: |
+          "$RUNNER_TEMP/telemetry-contract" -base report/base.json -candidate report/candidate.json -report-dir report
+      - name: Bind the report to this exact PR candidate
+        run: python3 base/tools/telemetry-contract/prepare.py base candidate report
+      - name: Save contracts, diff and exact candidate identity
+        id: artifacts
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: telemetry-report-${{ github.run_id }}-${{ github.run_attempt }}
+          path: report/
+          if-no-files-found: error
+          retention-days: 30
