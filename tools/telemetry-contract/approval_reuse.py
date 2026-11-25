@@ -45,7 +45,7 @@ def code_version(api, prefix, revision, collecting=True):
     entries = {}
     for entry in tree["tree"]:
         path = entry["path"]
-        if path not in (COLLECTION_WORKFLOW, REVIEW_WORKFLOW):
+        if path not in (COLLECTION_WORKFLOW, REVIEW_WORKFLOW, ".github/workflows/negative-decision.yml"):
             if not path.startswith(TOOL) or entry["type"] == "tree":
                 continue
             relative = path.removeprefix(TOOL)
