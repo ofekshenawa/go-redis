@@ -118,18 +118,52 @@ def validate_artifacts(manifest_path, delta_path, report_path, env):
             "Telemetry report hash does not match the reviewed report.")
     require(hashlib.sha256(delta_bytes).hexdigest() == manifest["delta_sha256"],
             "Telemetry delta hash does not match the reviewed report.")
+    multi_target = manifest["base_ref"] in ("negative-tests/environment", "negative-tests/label", "negative-tests/reaction")
+    if isinstance(delta, dict) and delta.get("version") == 2:
+        validate_rows(delta)
+    else:
+        require(not multi_target, "This target requires both negative tests.")
+        validate_telemetry(delta)
+    return manifest, delta
+
+
+def validate_rows(delta):
+    rows = delta.get("checks")
+    require(type(delta.get("has_changes")) is bool and isinstance(rows, list)
+            and all(isinstance(row, dict) for row in rows)
+            and [row.get("name") for row in rows] == ["OTel", "Public API"],
+            "Missing, duplicate or unknown negative tests.")
+    for row in rows:
+        name, outcome, diff = row["name"], row.get("result"), row.get("diff")
+        require(outcome != "error", f"{name} collection failed; see the collection log.")
+        require(isinstance(diff, list) and outcome == ("needs_review" if diff else "pass"),
+                f"Inconsistent {name} result.")
+        if name == "OTel":
+            validate_changes(diff)
+        else:
+            require(all(isinstance(line, str) and line.strip() and len(line.splitlines()) == 1 for line in diff),
+                    "Invalid public API diff.")
+    require(delta["has_changes"] == any(row["result"] == "needs_review" for row in rows),
+            "Inconsistent aggregate result.")
+
+
+def validate_telemetry(delta):
     require(isinstance(delta, dict) and delta.get("version") == 1
             and isinstance(delta.get("has_changes"), bool)
             and isinstance(delta.get("changes"), list), "Invalid telemetry delta.")
     require(delta["has_changes"] == bool(delta["changes"]), "Inconsistent telemetry delta.")
-    for change in delta["changes"]:
+    validate_changes(delta["changes"])
+
+
+def validate_changes(changes):
+    for change in changes:
         require(isinstance(change, dict)
                 and change.get("entity") in ("metric", "attribute_declaration")
                 and isinstance(change.get("identity"), str) and change["identity"]
                 and change.get("action") in ("add", "remove", "modify")
                 and "before" in change and "after" in change,
                 "Invalid telemetry change.")
-    return manifest, delta
+
 
 
 def current_candidate(api, prefix, manifest):
