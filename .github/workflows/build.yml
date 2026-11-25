@@ -24,25 +24,20 @@ jobs:
           api = GitHub(os.environ["GITHUB_TOKEN"])
           prefix = "/repos/" + os.environ["GITHUB_REPOSITORY"]
           origin = int(os.environ["GITHUB_RUN_ID"])
-          issue = api.post(f"{prefix}/issues", {"title":"Negative tests · bot authorization probe",
-                           "body":"Disposable evidence for the reaction and label decision rules. No merge is associated with this issue."})
-          pr = issue["number"]
+          pr = 29
           name = label_name(pr, origin)
-          try:
-              comment = api.post(f"{prefix}/issues/{pr}/comments", {"body":"Disposable authorization target for this Actions run."})
-              reaction = api.post(f"{prefix}/issues/comments/{comment['id']}/reactions", {"content":"+1"})
-              assert reaction["user"]["type"] == "Bot" and reaction["user"]["login"] == BOT
-              assert reaction_approval(api, prefix, {"comment_id":comment["id"]}) is None
-              label = api.post(f"{prefix}/labels", {"name":name, "color":"b60205"})
-              state = {"origin":origin,"pr":pr,"label_id":label["id"]}
-              api.post(f"{prefix}/issues/{pr}/labels", {"labels":[name]})
-              api.run("api", "-X", "DELETE", f"{prefix}/issues/{pr}/labels/{name}")
-              assert label_approval(api, prefix, state) is None
-              assert any(item["id"]==label["id"] for item in api.get(f"{prefix}/issues/{pr}/labels"))
-              message = f"Bot thumbs-up rejected. Bot label removal rejected and label restored. Evidence: {issue['html_url']}."
-              print(message)
-              with open(os.environ["GITHUB_STEP_SUMMARY"],"a") as summary:
-                  print(message, file=summary)
-          finally:
-              api.patch(f"{prefix}/issues/{pr}", {"state":"closed"})
+          comment = api.post(f"{prefix}/issues/{pr}/comments", {"body":"Disposable authorization target for this Actions run."})
+          reaction = api.post(f"{prefix}/issues/comments/{comment['id']}/reactions", {"content":"+1"})
+          assert reaction["user"]["type"] == "Bot" and reaction["user"]["login"] == BOT
+          assert reaction_approval(api, prefix, {"comment_id":comment["id"]}) is None
+          label = api.post(f"{prefix}/labels", {"name":name, "color":"b60205"})
+          state = {"origin":origin,"pr":pr,"label_id":label["id"]}
+          api.post(f"{prefix}/issues/{pr}/labels", {"labels":[name]})
+          api.run("api", "-X", "DELETE", f"{prefix}/issues/{pr}/labels/{name}")
+          assert label_approval(api, prefix, state) is None
+          assert any(item["id"]==label["id"] for item in api.get(f"{prefix}/issues/{pr}/labels"))
+          message = f"Bot thumbs-up rejected. Bot label removal rejected and label restored. Evidence: https://github.com/{os.environ['GITHUB_REPOSITORY']}/pull/{pr}."
+          print(message)
+          with open(os.environ["GITHUB_STEP_SUMMARY"],"a") as summary:
+              print(message, file=summary)
           PY
