@@ -27,7 +27,7 @@ jobs:
           prefix = "/repos/" + repo
           output = io.StringIO()
           with contextlib.redirect_stdout(output):
-              check(api, repo, 19, removed="review-19-45601534905")
+              check(api, repo, 19, removed="review-19-45603194554")
           assert "Ignored a label action for an older report." in output.getvalue()
           print(output.getvalue().strip())
           head = api.get(f"{prefix}/pulls/20")["head"]["sha"]
@@ -39,7 +39,11 @@ jobs:
               state = json.loads((d / "state.json").read_text())
               source = source_run(api, prefix, state["source_run_id"], repo)
               manifest, delta = validate_context(api, prefix, state, d, source)
-              state["comment_id"] = 7160635735
+              assert state["comment_id"] != 7160923809
+              prior = api.get(f"{prefix}/issues/comments/7160923809/reactions")
+              assert any(r["id"] == 483519196 and r["content"] == "+1" and r["user"]["login"] == "ofekshenawa" for r in prior)
+              print("The original human thumbs-up still exists on the previous report.")
+              state["comment_id"] = 7160923809
               try:
                   reconcile(api, prefix, state, manifest, delta)
               except Rejected as err:
