@@ -9,6 +9,7 @@ from pathlib import Path
 import sys
 import tempfile
 
+import alternative_gate
 from comment_report import comment_marker, render_comment
 from gate import GitHub, Rejected, approved_reviewer, current_candidate, number, require, sha, validate_artifacts
 from approval_reuse import context, fingerprint, artifact_name, find_approval, INVALID
@@ -245,7 +246,9 @@ def prepare(source_id, state_dir, env, api):
         manifest, delta = validate_context(api, prefix, state, state_dir, source)
         state.update(pr=manifest["pr"], has_changes=delta["has_changes"], needs_review=delta["has_changes"],
                      reused_approval=None, approval_artifact="")
-        if delta["has_changes"]:
+        if delta["has_changes"] and manifest["base_ref"] in alternative_gate.MODES:
+            state.update(alternative_gate.publish(api, prefix, state, manifest, delta), needs_review=False)
+        elif delta["has_changes"]:
             try:
                 state["approval_context"] = context(api, prefix, manifest, state["controller_sha"])
                 state["fingerprint"] = fingerprint(manifest, delta, state["approval_context"])
@@ -301,6 +304,10 @@ def finish(state_dir, publish_result, approval_result, env, api):
             raise
         require(state.get("pr") == manifest["pr"] and state.get("has_changes") == delta["has_changes"],
                 "Prepared report identity changed.")
+        if state.get("decision_mode"):
+            require(approval_result == "skipped", "Unexpected Environment decision for this report.")
+            alternative_gate.reconcile(api, prefix, state, manifest, delta, poll=True)
+            return "Report decision checked."
         if delta["has_changes"]:
             if delta["version"] == 2:
                 comment = api.get(f"{prefix}/issues/comments/{state['comment_id']}")
@@ -336,7 +343,7 @@ def finish(state_dir, publish_result, approval_result, env, api):
         reason = str(exc) if isinstance(exc, Rejected) else "Invalid controller state or API response."
         # The required status is blocked before any cosmetic comment update.
         conclude(api, prefix, state, "failure", reason)
-        if manifest is not None and delta is not None:
+        if manifest is not None and delta is not None and not state.get("decision_mode"):
             update_comment(api, prefix, state, manifest, delta, status)
         raise Rejected(reason) from None
 

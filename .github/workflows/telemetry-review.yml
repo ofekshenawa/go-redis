@@ -22,8 +22,10 @@ jobs:
       actions: read
       statuses: write
       pull-requests: write
+      issues: write
     outputs:
       status_id: ${{ steps.publish.outputs.status_id }}
+      pr: ${{ steps.publish.outputs.pr }}
       has_changes: ${{ steps.publish.outputs.has_changes }}
       needs_review: ${{ steps.publish.outputs.needs_review }}
       state_artifact: ${{ steps.publish.outputs.state_artifact }}
@@ -64,6 +66,9 @@ jobs:
 
   final:
     name: Finalize telemetry review
+    concurrency:
+      group: negative-decision-${{ needs.publish.outputs.pr || github.run_id }}
+      cancel-in-progress: false
     needs: [publish, review]
     if: always()
     runs-on: ubuntu-latest
@@ -73,6 +78,7 @@ jobs:
       actions: read
       statuses: write
       pull-requests: write
+      issues: write
     steps:
       - name: Check out the trusted controller only
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
