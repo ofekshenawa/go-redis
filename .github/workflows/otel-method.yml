@@ -1,0 +1,26 @@
+name: OTel method installation
+on:
+  pull_request:
+    branches: [negative-tests/infrastructure]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: OTel scanner tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: tools/telemetry-contract/go.mod
+          cache: false
+      - name: Test the scanner and scan the repository
+        working-directory: tools/telemetry-contract
+        run: |
+          go test ./...
+          go run . -root "$GITHUB_WORKSPACE" -output "$RUNNER_TEMP/contract.json"
