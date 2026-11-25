@@ -34,7 +34,7 @@ def digest(value):
     return hashlib.sha256(encoded(value).encode()).hexdigest()
 
 
-def code_version(api, prefix, revision):
+def code_version(api, prefix, revision, collecting=True):
     """Hash relevant file contents/modes, never the repository commit itself."""
     sha(revision, 40, "code revision")
     commit = api.get(f"{prefix}/git/commits/{revision}")
@@ -56,15 +56,18 @@ def code_version(api, prefix, revision):
         require(entry["type"] == "blob" and entry["mode"] in ("100644", "100755"),
                 "Telemetry tooling must consist of regular files.")
         entries[path] = [entry["mode"], sha(entry["sha"], 40, "code blob")]
-    require({COLLECTION_WORKFLOW, REVIEW_WORKFLOW, TOOL + "main.go", TOOL + "gate.py",
-             TOOL + "controller.py", TOOL + "approval_reuse.py"} <= entries.keys(),
+    required = {REVIEW_WORKFLOW, TOOL + "gate.py", TOOL + "controller.py", TOOL + "approval_reuse.py"}
+    if collecting:
+        required.add(COLLECTION_WORKFLOW)
+    require(required <= entries.keys(),
             "Telemetry approval reuse is not installed in this revision.")
     return digest(entries)
 
 
 def context(api, prefix, manifest, controller_sha):
-    revisions = {manifest["base_sha"], manifest["merge_sha"], controller_sha}
-    versions = {revision: code_version(api, prefix, revision) for revision in revisions}
+    collectors = {manifest["base_sha"], manifest["merge_sha"]}
+    versions = {revision: code_version(api, prefix, revision, collecting=revision in collectors)
+                for revision in collectors | {controller_sha}}
     environment = api.get(f"{prefix}/environments/{ENVIRONMENT}")
     rules = [rule for rule in environment["protection_rules"] if rule["type"] == "required_reviewers"]
     require(environment.get("name") == ENVIRONMENT and len(rules) == 1 and rules[0].get("reviewers"),

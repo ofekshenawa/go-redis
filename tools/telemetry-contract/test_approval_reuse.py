@@ -71,6 +71,7 @@ class ApprovalReuseTests(unittest.TestCase):
             self.manifest.update(base_sha=base, tool_sha=base)
         self.source = dict(self.source, id=124, head_sha="e" * 40)
         self.responses[self.prefix + "/actions/runs/124"] = self.source
+        self.responses[self.prefix + "/commits/" + "e" * 40 + "/statuses?per_page=100&page=1"] = []
         self.pr["head"]["sha"] = "e" * 40
         self.pr["base"]["sha"] = self.manifest["base_sha"]
         self.pr["merge_commit_sha"] = "f" * 40
@@ -93,17 +94,25 @@ class ApprovalReuseTests(unittest.TestCase):
         change(value)
         self.original_files[name] = json.dumps(value).encode()
 
+    def test_controller_may_run_from_foundation_without_collector(self):
+        self.paths.remove(reuse.COLLECTION_WORKFLOW)
+        self.paths.remove(reuse.TOOL + "main.go")
+        self.version("d" * 40)
+        state = self.prepare()
+        self.assertTrue(state["approval_artifact"])
+        self.assertTrue(state["needs_review"])
+
     def test_new_commit_reuses_human_approval_without_new_environment_review(self):
         self.approve_original()
         self.next_commit()
         state = self.prepare()
         self.assertEqual({"artifact_id": 900, "run_id": 456, "reviewer": "maintainer"}, state["reused_approval"])
         self.assertFalse(state["needs_review"])
-        self.assertEqual("in_progress", self.latest()["status"])
+        self.assertEqual("pending", self.latest()["state"])
         self.assertIn("Matching prior approval", self.comment()["body"])
         self.assertNotIn("Review telemetry — approve or reject", self.comment()["body"])
         self.finish(approval="skipped")
-        self.assertEqual("success", self.latest()["conclusion"])
+        self.assertEqual("success", self.latest()["state"])
         self.assertIn("Original human approval", self.comment()["body"])
         self.assertIn("actions/runs/456", self.comment()["body"])
         self.assertIn("Prior telemetry approval reused", self.comment()["body"])
@@ -114,7 +123,7 @@ class ApprovalReuseTests(unittest.TestCase):
         self.next_commit(base="1" * 40, controller_sha="2" * 40)
         self.assertFalse(self.prepare()["needs_review"])
         self.finish(approval="skipped")
-        self.assertEqual("success", self.latest()["conclusion"])
+        self.assertEqual("success", self.latest()["state"])
 
     def test_changed_attribute_instrument_unit_or_before_requires_review(self):
         self.approve_original()
@@ -169,7 +178,7 @@ class ApprovalReuseTests(unittest.TestCase):
         self.responses[self.prefix + "/actions/runs/457/approvals"] = copy.deepcopy(
             self.responses[self.prefix + "/actions/runs/456/approvals"])
         self.finish(approval="success")
-        self.assertEqual("success", self.latest()["conclusion"])
+        self.assertEqual("success", self.latest()["state"])
         self.assertIn("state_artifact=" + state["approval_artifact"], (self.root / "new-outputs").read_text())
 
     def test_no_changes_still_pass_without_any_previous_approval(self):
@@ -177,7 +186,7 @@ class ApprovalReuseTests(unittest.TestCase):
         self.rebuild()
         self.assertFalse(self.prepare()["needs_review"])
         self.finish(approval="skipped")
-        self.assertEqual("success", self.check()["conclusion"])
+        self.assertEqual("success", self.check()["state"])
 
     def test_expired_or_deleted_artifact_requests_manual_review(self):
         self.approve_original()
@@ -266,7 +275,7 @@ class ApprovalReuseTests(unittest.TestCase):
         self.responses[self.prefix + "/actions/runs/456/approvals"] = []
         with self.assertRaisesRegex(Rejected, "no longer reusable"):
             self.finish(approval="skipped")
-        self.assertEqual("failure", self.latest()["conclusion"])
+        self.assertEqual("failure", self.latest()["state"])
 
     def test_deleted_receipt_between_publish_and_final_cannot_pass(self):
         self.approve_original()
@@ -275,7 +284,7 @@ class ApprovalReuseTests(unittest.TestCase):
         self.responses[self.prefix + "/actions/artifacts/900"] = Rejected("deleted")
         with self.assertRaisesRegex(Rejected, "no longer reusable"):
             self.finish(approval="skipped")
-        self.assertEqual("failure", self.latest()["conclusion"])
+        self.assertEqual("failure", self.latest()["state"])
 
     def test_old_run_rerun_during_evidence_read_cannot_pass(self):
         self.approve_original()
@@ -296,7 +305,7 @@ class ApprovalReuseTests(unittest.TestCase):
         self.pr["head"]["sha"] = "3" * 40
         with self.assertRaisesRegex(Rejected, "current PR head"):
             self.finish(approval="skipped")
-        self.assertEqual("failure", self.latest()["conclusion"])
+        self.assertEqual("failure", self.latest()["state"])
 
     def test_collection_failure_is_never_waived_by_old_approval(self):
         self.approve_original()
@@ -304,7 +313,7 @@ class ApprovalReuseTests(unittest.TestCase):
         self.source["conclusion"] = "failure"
         with self.assertRaisesRegex(Rejected, "collection did not succeed"):
             self.prepare()
-        self.assertEqual("failure", self.latest()["conclusion"])
+        self.assertEqual("failure", self.latest()["state"])
 
     def test_optional_lookup_outage_requests_manual_review(self):
         self.approve_original()
@@ -350,7 +359,7 @@ class ApprovalReuseTests(unittest.TestCase):
             "artifacts": [latest, self.receipt]}
         with self.assertRaisesRegex(Rejected, "no longer reusable"):
             self.finish(approval="skipped")
-        self.assertEqual("failure", self.latest()["conclusion"])
+        self.assertEqual("failure", self.latest()["state"])
 
     def test_canonical_fingerprint_ignores_commit_and_order_not_delta(self):
         versions = {"version": 1, "collector": "same"}

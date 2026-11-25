@@ -1,0 +1,23 @@
+name: Negative tests - review infrastructure
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/negative-test-infrastructure.yml'
+      - '.github/workflows/telemetry-review.yml'
+      - 'tools/telemetry-contract/*.py'
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test report and approval handling
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - working-directory: tools/telemetry-contract
+        run: python3 -m unittest discover -p 'test_*.py'

@@ -2,6 +2,9 @@ name: Telemetry contract
 
 on:
   pull_request:
+    # The infrastructure branch hosts the approval policy. The method PR
+    # installs the first scanner and is validated by otel-method.yml.
+    branches-ignore: [negative-tests/infrastructure]
     types: [opened, synchronize, reopened, edited]
 
 permissions:

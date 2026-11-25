@@ -4,6 +4,7 @@
 import argparse
 import json
 import os
+import re
 from pathlib import Path
 import sys
 import tempfile
@@ -17,12 +18,11 @@ WORKFLOW = ".github/workflows/telemetry-contract.yml"
 MAX_BYTES = 20 * 1024 * 1024
 REQUIRED_FILES = {"manifest.json", "delta.json", "report.md"}
 ALLOWED_FILES = REQUIRED_FILES | {"base.json", "candidate.json", "review.txt"}
-CHECK_APP_ID = 15368  # GitHub Actions on github.com.
+STATUS_CONTEXT = "Negative tests / telemetry-contract"
 
 
 def identity(env):
     repository = env.get("GITHUB_REPOSITORY", "")
-    import re
     require(re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository), "Invalid controller repository.")
     require(number(env.get("GITHUB_RUN_ATTEMPT"), "controller attempt") == 1,
             "Controller reruns are not supported; start a fresh collection run.")
@@ -45,28 +45,67 @@ def outputs(env, **values):
                 stream.write(f"{key}={text}\n")
 
 
-def external_id(state):
-    return f"telemetry:source/{state['source_run_id']}/1:controller/{state['controller_run_id']}/1"
-
-
 def run_url(state):
     return f"https://github.com/{state['repository']}/actions/runs/{state['controller_run_id']}"
 
 
-def check_identity(api, prefix, state):
-    check = api.get(f"{prefix}/check-runs/{state['check_id']}")
-    require(check.get("name") == "telemetry-contract" and check.get("head_sha") == state["source_head_sha"]
-            and check.get("external_id") == external_id(state)
-            and check.get("app", {}).get("id") == CHECK_APP_ID,
-            "Check identity does not match this controller and source run.")
+def status_marker(state):
+    return f"Telemetry source {state['source_run_id']}: "
+
+
+def latest_status(api, prefix, state):
+    # The combined-status endpoint omits creator. The history endpoint includes
+    # it and returns newest first, so stop at the first matching context.
+    head = state["source_head_sha"]
+    for page in range(1, 11):
+        statuses = api.get(f"{prefix}/commits/{head}/statuses?per_page=100&page={page}")
+        require(isinstance(statuses, list), "Invalid commit status response.")
+        for item in statuses:
+            if (item.get("context") or "").casefold() == STATUS_CONTEXT.casefold():
+                require(item.get("url", "").endswith(f"/statuses/{head}"), "Status commit does not match.")
+                return item
+        if len(statuses) < 100:
+            return None
+    raise Rejected("Too many commit statuses to identify this telemetry result.")
+
+
+def status_identity(api, prefix, state):
+    latest = latest_status(api, prefix, state)
+    require(latest is not None and latest.get("target_url") == run_url(state)
+            and latest.get("description", "").startswith(status_marker(state))
+            and latest.get("creator", {}).get("login") == "github-actions[bot]"
+            and latest.get("creator", {}).get("type") == "Bot"
+            and number(latest.get("id"), "status ID") >= state["status_id"],
+            "Status identity changed or a newer telemetry review superseded this controller.")
+
+
+def post_status(api, prefix, state, conclusion, summary):
+    description = status_marker(state) + " ".join(summary.splitlines())
+    return api.post(f"{prefix}/statuses/{state['source_head_sha']}", {
+        "context": STATUS_CONTEXT, "state": conclusion, "target_url": run_url(state),
+        "description": description[:140],
+    })
+
+
+def start_status(api, prefix, state):
+    latest = latest_status(api, prefix, state)
+    if latest is not None:
+        source = re.match(r"Telemetry source ([0-9]+): ", latest.get("description", ""))
+        controller = re.fullmatch(re.escape(f"https://github.com/{state['repository']}/actions/runs/")
+                                  + r"([0-9]+)", latest.get("target_url", ""))
+        require(source is not None and controller is not None
+                and latest.get("creator", {}).get("login") == "github-actions[bot]"
+                and latest.get("creator", {}).get("type") == "Bot"
+                and (int(source[1]), int(controller[1])) <= (state["source_run_id"], state["controller_run_id"]),
+                "A newer or unrelated telemetry status must not be overwritten.")
+    return post_status(api, prefix, state, "pending", "Validating collection and publishing its report before review.")
 
 
 def conclude(api, prefix, state, conclusion, summary):
-    check_identity(api, prefix, state)
-    api.patch(f"{prefix}/check-runs/{state['check_id']}", {
-        "status": "completed", "conclusion": conclusion,
-        "output": {"title": "Telemetry contract " + conclusion, "summary": summary[:60000]},
-    })
+    # Commit statuses are append-only: refuse to supersede another controller's
+    # latest result rather than accidentally turning its newer candidate green.
+    status_identity(api, prefix, state)
+    post_status(api, prefix, state, conclusion, summary)
 
 
 def source_run(api, prefix, source_id, repository):
@@ -189,14 +228,10 @@ def prepare(source_id, state_dir, env, api):
     prefix = "/repos/" + state["repository"]
     source = source_run(api, prefix, state["source_run_id"], state["repository"])
     state["source_head_sha"] = source["head_sha"]
-    check = api.post(prefix + "/check-runs", {
-        "name": "telemetry-contract", "head_sha": source["head_sha"], "status": "in_progress",
-        "external_id": external_id(state), "details_url": run_url(state),
-        "output": {"title": "Verifying telemetry collection", "summary": "Validating collection and publishing its report before review."},
-    })
-    state["check_id"] = number(check.get("id"), "Check ID")
+    status = start_status(api, prefix, state)
+    state["status_id"] = number(status.get("id"), "status ID")
     save(state_dir, state)
-    outputs(env, check_id=state["check_id"])
+    outputs(env, status_id=state["status_id"])
     try:
         validate_source(source)
         read_artifact(api, prefix, source, state_dir)
@@ -239,7 +274,7 @@ def finish(state_dir, publish_result, approval_result, env, api):
     require(all(state.get(key) == value for key, value in expected.items()),
             "Controller state belongs to another run or trusted revision.")
     prefix = "/repos/" + state["repository"]
-    check_identity(api, prefix, state)
+    status_identity(api, prefix, state)
     manifest = delta = None
     status = "failed"
     try:
@@ -286,25 +321,25 @@ def finish(state_dir, publish_result, approval_result, env, api):
         return "Telemetry contract passed."
     except (Rejected, ValueError, KeyError, TypeError, AttributeError, OSError) as exc:
         reason = str(exc) if isinstance(exc, Rejected) else "Invalid controller state or API response."
-        # The required Check is blocked before any cosmetic comment update.
+        # The required status is blocked before any cosmetic comment update.
         conclude(api, prefix, state, "failure", reason)
         if manifest is not None and delta is not None:
             update_comment(api, prefix, state, manifest, delta, status)
         raise Rejected(reason) from None
 
 
-def fail(source_id, check_id, env, api):
-    """Block this controller's Check if state transfer/finalization failed."""
+def fail(source_id, status_id, env, api):
+    """Block this controller's status if state transfer/finalization failed."""
     state = identity(env)
-    state.update(source_run_id=number(source_id, "source run"), check_id=number(check_id, "Check ID"))
+    state.update(source_run_id=number(source_id, "source run"), status_id=number(status_id, "status ID"))
     prefix = "/repos/" + state["repository"]
     source = source_run(api, prefix, state["source_run_id"], state["repository"])
     state["source_head_sha"] = source["head_sha"]
-    # conclude verifies name, source head, Actions App and the source/controller
-    # external_id before writing. No downloaded state or report is required.
+    # No downloaded state or report is needed. Identity verification refuses
+    # to overwrite a status belonging to a different source/controller.
     conclude(api, prefix, state, "failure",
              "Telemetry finalization failed or was cancelled. No telemetry approval was accepted; start a fresh collection run.")
-    return "Telemetry Check marked as failed."
+    return "Telemetry status marked as failed."
 
 
 def main():
@@ -319,7 +354,7 @@ def main():
     finish_parser.add_argument("--approval-result", required=True)
     fail_parser = commands.add_parser("fail")
     fail_parser.add_argument("--source-run", required=True)
-    fail_parser.add_argument("--check-id", required=True)
+    fail_parser.add_argument("--status-id", required=True)
     args = parser.parse_args()
     try:
         api = GitHub(os.environ.get("GITHUB_TOKEN"))
@@ -329,7 +364,7 @@ def main():
         elif args.command == "finish":
             print(finish(args.state_dir, args.publish_result, args.approval_result, os.environ, api))
         else:
-            print(fail(args.source_run, args.check_id, os.environ, api))
+            print(fail(args.source_run, args.status_id, os.environ, api))
         return 0
     except (Rejected, ValueError, KeyError, TypeError, AttributeError, OSError) as exc:
         reason = str(exc) if isinstance(exc, Rejected) else "Invalid controller data or API response."
