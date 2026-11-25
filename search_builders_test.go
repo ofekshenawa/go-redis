@@ -146,7 +146,7 @@ var _ = Describe("RediSearch Builders", Label("search", "builders"), func() {
 		Expect(createVal).To(Equal("OK"))
 		WaitForIndexing(client, "idx_explain")
 
-		expl, err := client.NewExplainBuilder(ctx, "idx_explain", "foo").Run()
+		expl, err := client.ExplainBuilderFor(ctx, "idx_explain", "foo").Run()
 		Expect(err).NotTo(HaveOccurred())
 		Expect(expl).To(ContainSubstring("UNION"))
 	})
