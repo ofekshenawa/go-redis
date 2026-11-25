@@ -199,21 +199,27 @@ def approved_reviewer(api, prefix, run_id):
         if not any(isinstance(item, dict) and item.get("id") == environment_id
                    for item in review.get("environments", [])):
             continue
-        user = review.get("user", {})
-        if not isinstance(user, dict) or user.get("type") != "User":
-            continue
-        login = user.get("login")
-        if not isinstance(login, str) or not re.fullmatch(r"[A-Za-z0-9-]+", login):
-            continue
-        identity = user.get("id")
-        if type(identity) is not int or identity <= 0:
-            continue
-        permission = api.get(f"{prefix}/collaborators/{quote(login, safe='')}/permission")
-        if not isinstance(permission, dict):
-            continue
-        actor = permission.get("user", {})
-        if (permission.get("role_name") in ("admin", "maintain")
-                and isinstance(actor, dict) and actor.get("type") == "User"
-                and actor.get("id") == identity and actor.get("login") == login):
+        login = reviewer_login(api, prefix, review.get("user", {}))
+        if login:
             return login
     raise Rejected("This run has no telemetry-review approval from a repository admin or maintainer.")
+
+
+def reviewer_login(api, prefix, user):
+    if not isinstance(user, dict) or user.get("type") != "User":
+        return None
+    login = user.get("login")
+    if not isinstance(login, str) or not re.fullmatch(r"[A-Za-z0-9-]+", login):
+        return None
+    identity = user.get("id")
+    if type(identity) is not int or identity <= 0:
+        return None
+    permission = api.get(f"{prefix}/collaborators/{quote(login, safe='')}/permission")
+    if not isinstance(permission, dict):
+        return None
+    actor = permission.get("user", {})
+    if (permission.get("role_name") in ("admin", "maintain")
+            and isinstance(actor, dict) and actor.get("type") == "User"
+            and actor.get("id") == identity and actor.get("login") == login):
+        return login
+    return None

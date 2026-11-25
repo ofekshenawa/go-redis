@@ -211,7 +211,7 @@ def render_findings(manifest, delta):
                             line = f"{sign} attribute/label: {_source(attr['name'])} ({_source(attr['type'])})"
                             lines.append(line)
         else:
-            lines = ["- " + _source(line) for line in diff]
+            lines = ["- " + _source(line.removeprefix("- ")) for line in diff]
         lines = list(dict.fromkeys(lines))
         # Keep the decision visible above the fold; all lines are in delta.json.
         shown = [line[:240] + ("…" if len(line) > 240 else "") for line in lines[:8]]

@@ -45,7 +45,7 @@ def code_version(api, prefix, revision, collecting=True):
     entries = {}
     for entry in tree["tree"]:
         path = entry["path"]
-        if path not in (COLLECTION_WORKFLOW, REVIEW_WORKFLOW):
+        if path not in (COLLECTION_WORKFLOW, REVIEW_WORKFLOW, ".github/workflows/negative-decision.yml"):
             if not path.startswith(TOOL) or entry["type"] == "tree":
                 continue
             relative = path.removeprefix(TOOL)
@@ -64,19 +64,22 @@ def code_version(api, prefix, revision, collecting=True):
     return digest(entries)
 
 
-def context(api, prefix, manifest, controller_sha):
+def context(api, prefix, manifest, controller_sha, *, mode="environment"):
     collectors = {manifest["base_sha"], manifest["merge_sha"]}
     versions = {revision: code_version(api, prefix, revision, collecting=revision in collectors)
                 for revision in collectors | {controller_sha}}
+    tooling = {"version": 1, "base_tool": versions[manifest["base_sha"]],
+               "candidate_tool": versions[manifest["merge_sha"]], "controller": versions[controller_sha]}
+    if mode in ("reaction", "label"):
+        return {**tooling, "method": mode, "roles": ["admin", "maintain"]}
+    require(mode == "environment", "Unsupported approval method.")
     environment = api.get(f"{prefix}/environments/{ENVIRONMENT}")
     rules = [rule for rule in environment["protection_rules"] if rule["type"] == "required_reviewers"]
     require(environment.get("name") == ENVIRONMENT and len(rules) == 1 and rules[0].get("reviewers"),
             "Approval reuse requires configured Environment reviewers.")
     reviewers = sorted([item["type"], number(item["reviewer"]["id"], "Environment reviewer")]
                        for item in rules[0]["reviewers"])
-    return {"version": 1, "base_tool": versions[manifest["base_sha"]],
-            "candidate_tool": versions[manifest["merge_sha"]], "controller": versions[controller_sha],
-            "environment": {"id": number(environment["id"], "Environment"), "reviewers": reviewers,
+    return {**tooling, "environment": {"id": number(environment["id"], "Environment"), "reviewers": reviewers,
                             "prevent_self_review": rules[0].get("prevent_self_review", False),
                             "can_admins_bypass": environment.get("can_admins_bypass")}}
 
