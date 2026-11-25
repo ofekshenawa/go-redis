@@ -1,9 +1,6 @@
-name: Negative-test unauthorized actor probe
+name: Negative-test stale target probe
 on: workflow_dispatch
-permissions:
-  contents: read
-  issues: write
-  pull-requests: write
+permissions: read-all
 jobs:
   probe:
     runs-on: ubuntu-latest
@@ -11,34 +8,43 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          ref: 2396228c817ac250d3b6e71e5e8b94be089dcbd5
+          ref: 36bdbe965dca4a6c990435cb505356d8b812bd6f
           persist-credentials: false
-      - name: Verify production rules reject bot reaction and bot removal on a disposable issue
+      - name: Verify older decision target cannot authorize the current report
         env:
           GITHUB_TOKEN: ${{ github.token }}
           PYTHONPATH: tools/telemetry-contract
         run: |
           python3 - <<'PY'
-          import os
-          from alternative_gate import BOT, label_approval, label_name, reaction_approval
-          from gate import GitHub
+          import contextlib, io, json, os, tempfile
+          from pathlib import Path
+          from alternative_gate import reconcile
+          from gate import GitHub, Rejected
+          from recheck import check
+          from controller import latest_status, source_run, validate_context
           api = GitHub(os.environ["GITHUB_TOKEN"])
-          prefix = "/repos/" + os.environ["GITHUB_REPOSITORY"]
-          origin = int(os.environ["GITHUB_RUN_ID"])
-          pr = 29
-          name = label_name(pr, origin)
-          comment = api.post(f"{prefix}/issues/{pr}/comments", {"body":"Disposable authorization target for this Actions run."})
-          reaction = api.post(f"{prefix}/issues/comments/{comment['id']}/reactions", {"content":"+1"})
-          assert reaction["user"]["type"] == "Bot" and reaction["user"]["login"] == BOT
-          assert reaction_approval(api, prefix, {"comment_id":comment["id"]}) is None
-          label = api.post(f"{prefix}/labels", {"name":name, "color":"b60205"})
-          state = {"origin":origin,"pr":pr,"label_id":label["id"]}
-          api.post(f"{prefix}/issues/{pr}/labels", {"labels":[name]})
-          api.run("api", "-X", "DELETE", f"{prefix}/issues/{pr}/labels/{name}")
-          assert label_approval(api, prefix, state) is None
-          assert any(item["id"]==label["id"] for item in api.get(f"{prefix}/issues/{pr}/labels"))
-          message = f"Bot thumbs-up rejected. Bot label removal rejected and label restored. Evidence: https://github.com/{os.environ['GITHUB_REPOSITORY']}/pull/{pr}."
-          print(message)
-          with open(os.environ["GITHUB_STEP_SUMMARY"],"a") as summary:
-              print(message, file=summary)
+          repo = os.environ["GITHUB_REPOSITORY"]
+          prefix = "/repos/" + repo
+          output = io.StringIO()
+          with contextlib.redirect_stdout(output):
+              check(api, repo, 19, removed="review-19-45601534905")
+          assert "Ignored a label action for an older report." in output.getvalue()
+          print(output.getvalue().strip())
+          head = api.get(f"{prefix}/pulls/20")["head"]["sha"]
+          status = latest_status(api, prefix, {"source_head_sha":head})
+          run_id = int(status["target_url"].rsplit("/",1)[1])
+          with tempfile.TemporaryDirectory() as tmp:
+              d = Path(tmp)
+              api.download(repo, run_id, f"telemetry-review-state-{run_id}-1", d)
+              state = json.loads((d / "state.json").read_text())
+              source = source_run(api, prefix, state["source_run_id"], repo)
+              manifest, delta = validate_context(api, prefix, state, d, source)
+              state["comment_id"] = 7160635735
+              try:
+                  reconcile(api, prefix, state, manifest, delta)
+              except Rejected as err:
+                  assert "original decision comment changed" in str(err), str(err)
+                  print("A different real same-PR comment was rejected before decision evaluation.")
+              else:
+                  raise AssertionError("Expected the original-report identity check to reject")
           PY
