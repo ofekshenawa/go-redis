@@ -11,6 +11,7 @@ import tempfile
 
 from comment_report import comment_marker, render_comment
 from gate import GitHub, Rejected, approved_reviewer, current_candidate, number, require, sha, validate_artifacts
+from approval_reuse import context, fingerprint, artifact_name, find_approval, INVALID
 
 
 WORKFLOW = ".github/workflows/telemetry-contract.yml"
@@ -22,7 +23,6 @@ STATUS_CONTEXT = "Negative tests / telemetry-contract"
 
 def identity(env):
     repository = env.get("GITHUB_REPOSITORY", "")
-    import re
     require(re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository), "Invalid controller repository.")
     require(number(env.get("GITHUB_RUN_ATTEMPT"), "controller attempt") == 1,
             "Controller reruns are not supported; start a fresh collection run.")
@@ -54,19 +54,19 @@ def status_marker(state):
 
 
 def latest_status(api, prefix, state):
-    # Combined status contains only the newest entry for each context. Paginate
-    # when a repository has more than 100 different status contexts.
+    # The combined-status endpoint omits creator. The history endpoint includes
+    # it and returns newest first, so stop at the first matching context.
+    head = state["source_head_sha"]
     for page in range(1, 11):
-        result = api.get(f"{prefix}/commits/{state['source_head_sha']}/status?per_page=100&page={page}")
-        require(result.get("sha") == state["source_head_sha"], "Status commit does not match this source run.")
-        statuses = result.get("statuses")
+        statuses = api.get(f"{prefix}/commits/{head}/statuses?per_page=100&page={page}")
         require(isinstance(statuses, list), "Invalid commit status response.")
         for item in statuses:
-            if item.get("context") == STATUS_CONTEXT:
+            if (item.get("context") or "").casefold() == STATUS_CONTEXT.casefold():
+                require(item.get("url", "").endswith(f"/statuses/{head}"), "Status commit does not match.")
                 return item
         if len(statuses) < 100:
             return None
-    raise Rejected("Too many commit status contexts to identify this telemetry result.")
+    raise Rejected("Too many commit statuses to identify this telemetry result.")
 
 
 def status_identity(api, prefix, state):
@@ -193,7 +193,7 @@ def own_comment(comment, manifest, state):
 
 
 def publish(api, prefix, state, manifest, delta):
-    body = render_comment(manifest, delta, "pending")
+    body = render_comment(review_manifest(manifest, state), delta, "reusing" if state.get("reused_approval") else "pending")
     for page in range(1, 11):
         comments = api.get(f"{prefix}/issues/{manifest['pr']}/comments?per_page=100&page={page}")
         for comment in comments:
@@ -211,7 +211,14 @@ def update_comment(api, prefix, state, manifest, delta, status):
         return
     comment = api.get(f"{prefix}/issues/comments/{state['comment_id']}")
     require(own_comment(comment, manifest, state), "Comment identity no longer matches this report and controller.")
-    api.patch(f"{prefix}/issues/comments/{state['comment_id']}", {"body": render_comment(manifest, delta, status)})
+    api.patch(f"{prefix}/issues/comments/{state['comment_id']}", {"body": render_comment(review_manifest(manifest, state), delta, status)})
+
+
+def review_manifest(manifest, state):
+    result = dict(manifest)
+    if state.get("reused_approval"):
+        result["reused_approval_run_id"] = state["reused_approval"]["run_id"]
+    return result
 
 
 def prepare(source_id, state_dir, env, api):
@@ -229,13 +236,28 @@ def prepare(source_id, state_dir, env, api):
         validate_source(source)
         read_artifact(api, prefix, source, state_dir)
         manifest, delta = validate_context(api, prefix, state, state_dir, source)
-        state.update(pr=manifest["pr"], has_changes=delta["has_changes"])
+        state.update(pr=manifest["pr"], has_changes=delta["has_changes"], needs_review=delta["has_changes"],
+                     reused_approval=None, approval_artifact="")
         if delta["has_changes"]:
+            try:
+                state["approval_context"] = context(api, prefix, manifest, state["controller_sha"])
+                state["fingerprint"] = fingerprint(manifest, delta, state["approval_context"])
+                state["approval_artifact"] = artifact_name(manifest, state["fingerprint"])
+                state["reused_approval"] = find_approval(api, prefix, state, manifest, delta)
+                state["needs_review"] = state["reused_approval"] is None
+            except INVALID:
+                # Reuse is optional. Incomplete version/evidence lookup never
+                # grants approval; the existing manual path remains available.
+                state.pop("approval_context", None)
+                state.pop("fingerprint", None)
+                state["approval_artifact"] = ""
             comment = publish(api, prefix, state, manifest, delta)
             state.update(comment_id=number(comment.get("id"), "comment ID"), comment_url=comment.get("html_url", ""))
         state["validated"] = True
         save(state_dir, state)
-        outputs(env, has_changes=state["has_changes"], pr=state["pr"], comment_url=state.get("comment_url", ""))
+        outputs(env, has_changes=state["has_changes"], needs_review=state["needs_review"], pr=state["pr"],
+                state_artifact=state["approval_artifact"] if state["needs_review"] and state["approval_artifact"]
+                else f"telemetry-review-state-{state['controller_run_id']}-1", comment_url=state.get("comment_url", ""))
         return state
     except (Rejected, ValueError, KeyError, TypeError, AttributeError, OSError) as exc:
         reason = str(exc) if isinstance(exc, Rejected) else "Invalid collection artifact or API response."
@@ -274,12 +296,24 @@ def finish(state_dir, publish_result, approval_result, env, api):
                 "Prepared report identity changed.")
         if delta["has_changes"]:
             status = "cancelled" if approval_result == "cancelled" else "rejected"
-            require(approval_result == "success", "Telemetry changes were not approved in this controller run.")
-            approved_reviewer(api, prefix, state["controller_run_id"])
+            if state.get("approval_context"):
+                versions = context(api, prefix, manifest, state["controller_sha"])
+                require(versions == state["approval_context"]
+                        and fingerprint(manifest, delta, versions) == state["fingerprint"]
+                        and artifact_name(manifest, state["fingerprint"]) == state["approval_artifact"],
+                        "Approval effect or policy changed after publication.")
+            if state.get("reused_approval"):
+                require(approval_result == "skipped" and state.get("needs_review") is False,
+                        "Unexpected review job for reused approval.")
+                evidence = find_approval(api, prefix, state, manifest, delta)
+                require(evidence == state["reused_approval"], "Original approval is no longer reusable; start a fresh run.")
+            else:
+                require(approval_result == "success", "Telemetry changes were not approved in this controller run.")
+                approved_reviewer(api, prefix, state["controller_run_id"])
             status = "stale"
             current_candidate(api, prefix, manifest)
             status = "failed"
-            update_comment(api, prefix, state, manifest, delta, "approved")
+            update_comment(api, prefix, state, manifest, delta, "reused" if state.get("reused_approval") else "approved")
         else:
             require(approval_result == "skipped", "Unexpected approval job for an unchanged contract.")
         conclude(api, prefix, state, "success", "Telemetry contract unchanged." if not delta["has_changes"]

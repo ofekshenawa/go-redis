@@ -25,6 +25,8 @@ jobs:
     outputs:
       status_id: ${{ steps.publish.outputs.status_id }}
       has_changes: ${{ steps.publish.outputs.has_changes }}
+      needs_review: ${{ steps.publish.outputs.needs_review }}
+      state_artifact: ${{ steps.publish.outputs.state_artifact }}
       comment_url: ${{ steps.publish.outputs.comment_url }}
     steps:
       - name: Check out the trusted controller only
@@ -42,15 +44,15 @@ jobs:
         if: always()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
-          name: telemetry-review-state-${{ github.run_id }}-${{ github.run_attempt }}
+          name: ${{ steps.publish.outputs.state_artifact || format('telemetry-review-state-{0}-{1}', github.run_id, github.run_attempt) }}
           path: state/
-          if-no-files-found: warn
+          if-no-files-found: error
           retention-days: 30
 
   review:
     name: Approve or reject the PR telemetry diff
     needs: publish
-    if: needs.publish.outputs.has_changes == 'true'
+    if: needs.publish.outputs.needs_review == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     environment:
@@ -80,7 +82,7 @@ jobs:
       - name: Restore this review run's state
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
-          name: telemetry-review-state-${{ github.run_id }}-${{ github.run_attempt }}
+          name: ${{ needs.publish.outputs.state_artifact || format('telemetry-review-state-{0}-{1}', github.run_id, github.run_attempt) }}
           path: state
       - name: Complete the check on the PR commit
         env:

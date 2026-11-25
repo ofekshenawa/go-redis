@@ -1,244 +1,59 @@
-# Telemetry contract: base comparison with native approval
+# Negative tests with GitHub Environment review
 
-Every PR is compared with its target branch. There is **no committed telemetry
-JSON**, service, database or custom GitHub App. The same static Go analyzer from
-the fixed base commit extracts both contracts without running client code.
+This foundation publishes the result of a telemetry comparison as
+`Negative tests / telemetry-contract` on the pull request's head commit. A
+read-only collector supplies a report comparing the target commit with the
+proposed merge. The collector and its coverage belong to the method layered
+above this branch.
 
-```text
-pull_request (read-only): fixed base B + PR head H → merge candidate M
-                  contract(B) vs contract(M) → immutable artifacts
-                                      |
-workflow_run (trusted default branch): validate source run + candidate
-                        /                              \
-                    no change                        change
-                        |                     post colored diff on PR
-                        |                     link to this review run
-                        |                              |
-                        |                    telemetry-review Environment
-                        \                              /
-                         validate current candidate + reviewer
-                         update Negative tests / telemetry-contract on PR head H
-```
+## From collection to review
 
-The comparison succeeds when it finds changes; it produces `has_changes=true`.
-Only the approval job waits. The final required check passes after verifying the
-current PR, the report hashes, this workflow run and an actual Environment
-approval by a repository **admin or maintainer**. Collection errors cannot be
-approved. Rejection/cancellation/failure does not produce a successful final gate.
-A force-cancel can prevent the final job from running; its absent/cancelled result
-must remain merge-blocking.
+1. The method's `pull_request` workflow is named `Telemetry contract` and lives
+   at `.github/workflows/telemetry-contract.yml`. It writes `delta.json` and
+   `report.md` and calls `prepare.py` to bind them to the exact PR, commits and
+   collection run. It uploads them with `manifest.json` as
+   `telemetry-report-<run ID>-1`.
+2. GitHub runs `.github/workflows/telemetry-review.yml` from the repository's
+   **default branch** when collection completes. The controller downloads the
+   artifact, verifies the run, hashes and current candidate, and publishes a
+   PR comment with a readable diff if telemetry changed.
+3. With no changes the required status passes automatically. A new change
+   waits for a reviewer through the comment's link to the native
+   `telemetry-review` Environment. A repository admin or maintainer must be
+   among the Environment reviewers and approve the run. The final job checks
+   both their permission and the current candidate before publishing success.
+   Collection errors, rejection, failed validation and cancelled reviews block
+   merging.
 
-## Present the demo
+An identical change in the same PR, targeting the same branch, can reuse its
+original manual approval. The fingerprint covers the canonical metric changes,
+tool and workflow contents, and Environment policy. The controller checks the
+latest matching review artifact, the original review, and the approver's
+current role. A changed delta or policy, a retarget, or missing or expired
+evidence requires manual review. A changed commit SHA alone does not invalidate
+an otherwise matching approval. Review artifacts are retained for 30 days.
 
-The demo repository is `ofekshenawa/go-redis`. Its `master` stays identical to
-`redis/go-redis`; `telemetry-demo/base` adds the guard and is the demo repository's
-default branch. This lets GitHub run the trusted `workflow_run` publisher while
-leaving `master` untouched. Demo PRs target that branch. In production both
-workflows must be installed on the normal default branch.
+## Repository setup
 
-1. Open the no-change PR. Collection completes, the trusted review workflow skips
-   human approval, and its `Negative tests / telemetry-contract` commit status on the PR head is green.
-2. Open the metric-change PR's **Conversation**. A bot comment shows the exact
-   source head, full PR telemetry delta in colored `diff` blocks, and the link
-   **Review telemetry — approve or reject** below it.
-3. Click that link. It opens the exact **Negative tests - telemetry review** run. Choose
-   **Review deployments → telemetry-review → Approve and deploy**, or **Reject**.
-   Nothing is deployed. The final validator checks admin/maintain permission and
-   current B/H/M, updates the PR check, and updates that comment's status.
-4. A new commit creates a new source/report/review run and requires new approval.
-   Each report comment identifies its source head and run; an old approval cannot
-   authorize the new candidate. Comments are idempotent per source report.
-5. To demonstrate a moved base, advance the demo target and update/rebase the PR.
-   The new run compares against the new target. Final validation rejects a stale
-   candidate even if its native review was approved.
+* Create the `telemetry-review` Environment with required reviewers and
+  disable administrator bypass. The single-owner demo uses `@ofekshenawa`.
+  The Environment is repository configuration. The YAML refers to it by name.
+* The trusted review workflow must be installed on the default branch for
+  GitHub to deliver its `workflow_run` events. Each demo PR targets its
+  method branch, which supplies the baseline and the trusted collector.
+* Require `Negative tests / telemetry-contract` from GitHub Actions on the
+  branch receiving demo PRs, with strict up-to-date checks. When migrating
+  from `telemetry-contract`, verify a genuine run under the new name before
+  switching the required status. Code-owner review protects the workflows
+  and tool on production branches.
+* The collector runs with read-only permissions. Publishing a comment and a
+  commit status uses only the trusted default branch's controller. The report
+  is treated as data and the approval job deploys nothing.
+* Start a fresh run after rebasing or retargeting. A new push or reopening
+  the PR runs collection again. Re-running a workflow attempt is rejected
+  because review history identifies a run rather than a specific attempt.
+  Installation on a merge queue requires a separate merge-group integration.
 
-`telemetry-review` has `@ofekshenawa` as its required reviewer. The demo permits
-self-approval because it is a single-user repository; the API still requires the
-reviewer to be admin/maintain. Admin bypass is disabled. No secrets are needed.
-
-GitHub's native approval popup has no custom report body. The report now lives
-in the PR conversation, with its decision link directly underneath. The link
-opens the approval interface; it is not a one-click approval. The report compares
-the **whole PR against its target branch**, including earlier commits. Large
-comments state explicitly when truncated and link to the full source artifacts.
-
-## GitHub setup and trust boundary
-
-- Create Environment **telemetry-review** with required reviewers. Add only the
-  intended maintainers/admins, and disable admin bypass. The final API check also
-  verifies the actual approving user's `role_name` and identity.
-- Use this Environment on **exactly one job per workflow run**. Review history
-  identifies the run and Environment, not an individual report or job.
-- Require status **Negative tests / telemetry-contract** and **branches up to date before merging**.
-  Apply this to every permitted target branch. The final API check reduces races;
-  GitHub's strict branch protection handles the race after it finishes.
-- Require code-owner review for the collector, all workflows and CODEOWNERS.
-  The collector comes from B; the publisher and final validator come from the
-  exact trusted default-branch workflow commit. The collection workflow itself
-  still needs protected review. Artifact hashes bind data to a run; they do not
-  prove that an unreviewed, modified collection workflow is honest. In production add
-  a second eligible code owner for changes authored by the first owner. A single
-  owner cannot approve their own normal PR review.
-- Collection uses `pull_request`, read-only tokens, pinned actions and no shared
-  Actions cache. Forks retain GitHub's workflow-run approval policy.
-- Install `.github/workflows/telemetry-review.yml` on the **default branch**.
-  Its `workflow_run: completed` publisher has only the read permissions needed
-  for evidence plus Commit-status/PR-comment write permissions. It never checks out or
-  executes PR code, scripts from artifacts, or a publisher supplied by a PR.
-  GitHub CLI downloads artifacts into an isolated temporary directory. Only
-  allowlisted, size-bounded data files are accepted; none are executed.
-- The controller validates the source event/repository/workflow/run/attempt,
-  artifact identity and hashes, live PR/base and merge parents before publishing
-  an approvable comment. The review run is distinct from the collection run;
-  both identities are bound into the trusted review state and the commit status.
-- The required commit status is published on the **PR head**, because native
-  `workflow_run` job checks attach to the default-branch commit. Its context is
-  **Negative tests / telemetry-contract** and its Details link opens the exact
-  review run. Protect its source as GitHub Actions. Do not require the controller's
-  own job names. Custom Check Runs created with `GITHUB_TOKEN` can be grouped
-  into an unrelated workflow (such as RE Tests); commit statuses avoid that.
-  Before a terminal update, the controller verifies that the latest status still
-  belongs to its own run. A superseded controller cannot replace a newer result.
-- When upgrading an installation that requires the old `telemetry-contract`
-  Check Run, first install the updated review workflow on the default branch
-  and start a fresh PR run. After the new status appears, replace the required
-  context with **Negative tests / telemetry-contract**, preserving the GitHub
-  Actions source and strict up-to-date protection. Historical checks retain their
-  old grouping; the new status applies to subsequent runs.
-- The MVP does **not** implement `merge_group`. Do not disable an existing merge
-  queue to install it; first implement/test that integration. An absent queue
-  check must block rather than silently pass.
-
-The demo branch can enforce the final check with strict up-to-date validation.
-Its single-owner setup demonstrates the approval UX; it is not proof of a
-production policy against a malicious workflow author. No production branch
-protections or upstream settings are changed by installing these files.
-
-## Base updates, stacked PRs and reruns
-
-The manifest fixes B, H, M, tool revision, collection run ID/attempt and both report
-hashes. Trusted review state also binds the separate approval run and controller
-revision. The base is the actual PR target, including a parent branch for stacked
-PRs. Merge parent first, retarget the child, update it and review its new run.
-There is no dependency database or persistent approval reuse.
-
-A new base/head/target invalidates the old candidate. A base push alone does not
-schedule this PR workflow: update/rebase the PR or close/reopen it to start a
-fresh run. Strict up-to-date protection prevents an old green check authorizing
-an outdated merge.
-
-GitHub's approval-history API does not expose the run attempt associated with an
-approval. Therefore **Re-run jobs / Re-run all jobs are rejected in this MVP**.
-For a fresh attempt, push a new commit (an empty commit works) or reopen the PR.
-This deliberately trades convenience for unambiguous run-to-report approval.
-
-## Local commands and files
-
-Use the Go version in `go.mod`. From this directory:
-
-```sh
-go test ./...
-python3 -m unittest discover -p 'test_*.py'
-go build -o /tmp/telemetry-contract .
-/tmp/telemetry-contract -root /path/to/base -output /tmp/base.json
-/tmp/telemetry-contract -root /path/to/merge-candidate -output /tmp/candidate.json
-/tmp/telemetry-contract -base /tmp/base.json -candidate /tmp/candidate.json -report-dir /tmp/report
-```
-
-Exit `0` means successful collection/comparison, including changes. Exit `2`
-means invalid source/input. A completely empty inventory is an error; retiring
-all telemetry requires a separately reviewed coverage-policy change.
-
-- `load.go`, `scan.go`: language-specific source extraction.
-- `main.go`, `compare.go`: capture CLI, contract normalization, structured delta
-  and a short Markdown summary. Other clients can supply the same JSON contract.
-- `prepare.py`: binds a completed report to fixed Git commits and this fresh run.
-- `gate.py`: shared GitHub CLI adapter and report/candidate/reviewer validation.
-- `comment_report.py`: deterministic, escaped colored-diff comment presentation.
-- `controller.py`: validate source evidence, publish/update the comment, and
-  publish/finalize the commit status on the explicit PR SHA.
-- `.github/workflows/telemetry-contract.yml`: unprivileged collection only.
-- `.github/workflows/telemetry-review.yml`: trusted publication → approval → final check.
-
-Contracts, delta, report and manifest exist only as per-run artifacts (30 days).
-The approval is available in the GitHub run's review history.
-
-## Reusing existing tools
-
-- Native GitHub Environments provide the approval/rejection gate.
-- Official `actions/upload-artifact` and `actions/download-artifact` transfer
-  report and review state between jobs.
-- [GitHub CLI](https://cli.github.com/manual/gh_api) handles authentication and
-  API requests; `gh run download` handles artifact transport and extraction.
-  The trusted review jobs require `gh`, already installed on GitHub-hosted runners.
-- `comment_report.py` is the single detailed human-readable renderer. The Go
-  comparator produces `delta.json` and a short count-only `report.md`; it no
-  longer maintains a second rich report, `review.txt`, or dynamic approval titles.
-
-The remaining custom code extracts the source contract and validates exactly
-which report, candidate and approval may turn the required check green. Replacing
-small comment/status API calls with separate Actions would add orchestration and
-state handoffs without removing that policy. The current flow keeps those calls
-in one controller using the official CLI, rather than a custom HTTP client.
-
-## What is collected
-
-The initial inventory covers `extra/redisotel-native`, `extra/redisotel`, and
-`extra/redisprometheus`. Production modules are discovered from imports, including
-new modules in a PR and callers of local telemetry modules. Tests, examples,
-`testdata`, doctests, fuzz/e2e fixtures, vendored code and tools are excluded.
-Production files excluded by build constraints in a selected module fail the
-check rather than silently disappearing. Add explicit support before introducing
-platform-specific telemetry.
-
-Each metric records:
-
-- Source package, metric name, numeric instrument type and unit.
-- Attribute/label names and their OTel types **per metric**.
-- Whether the API accepts caller-provided attributes.
-
-A separate `attribute_declarations` list records OTel attribute constructions,
-including ones not attached to a metric, and tracing attributes in the selected
-packages. This also detects a newly declared key in unused code. Prometheus
-labels appear on their metric with type `string`. Prometheus' existing public
-namespace/subsystem options are represented as `{namespace}` and `{subsystem}`;
-the metric suffix and label names must be static.
-
-The scanner follows constants, local helpers, common slices/structs, attribute
-sets and the existing attribute cache. It reads referenced semantic-convention
-helpers from the pinned OTel dependency. All function bodies and conditional
-branches are considered, even if no test calls them. Alternative instrument
-kinds remain separate entries (for example the legacy cumulative-counter option).
-Known APIs are handled explicitly; unsupported metric/attribute APIs, unresolved
-metric names/units/attribute keys and indirect telemetry calls stop analysis.
-
-## Coverage limits
-
-This is a **source inventory**, not proof of runtime behavior or arbitrary Go
-program equivalence. It uses a conservative union of possible values. Struct
-fields are joined by their declared field, and cache entries are joined; distinct
-instances/configurations can therefore contribute attributes to the same metric.
-For example, the legacy tracing and metrics configuration share fields. This can
-report more attributes than one runtime configuration actually emits, and it
-cannot detect a change in correlations or a new use already represented by that
-union. A refactor that changes the conservative result requires review of the
-JSON diff.
-
-It does not compare sample values, attribute values, timestamps, descriptions,
-histogram boundaries, emission frequency or whether a registration/recording
-path is reachable. Meter scope names and exporter/resource-level transformations
-are also outside this version's schema. Application-supplied attribute keys are
-intentionally open; the contract records that extension point, not the keys a
-consumer might supply. Arbitrary reflection, unsafe code, generated code not
-present in the checkout, and new external telemetry wrappers require additional
-analysis support and review. External dependencies are not recursively audited
-for all of their own telemetry. OpenCensus is outside this OTel/Prometheus guard.
-
-
-The Go frontend is specific to the supported go-redis patterns. Another client
-needs its own language-specific extractor. The comparison/approval design does
-not require a checked-in baseline or an approval backend.
-
-References: [Environment review](https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/review-deployments),
-[workflow review history](https://docs.github.com/en/rest/actions/workflow-runs#get-the-review-history-for-a-workflow-run),
-[protected branches](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-protected-branches/about-protected-branches).
+Run the infrastructure tests from this directory with
+`python3 -m unittest discover -p 'test_*.py'`. The tests cover report binding,
+PR comments, Environment review, approval reuse and stale status updates.

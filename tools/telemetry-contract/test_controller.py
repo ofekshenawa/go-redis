@@ -16,22 +16,25 @@ class API:
         self.files = files
         self.writes = []
         self.downloads = []
+        self.receipts = {}
         self.next_status = 100
 
     def get(self, path):
         response = self.responses[path]
         if isinstance(response, Exception):
             raise response
-        return copy.deepcopy(response)
+        result = copy.deepcopy(response)
+        if "/actions/artifacts?name=" in path and isinstance(result, dict) and "artifacts" in result:
+            result.setdefault("total_count", len(result["artifacts"]))
+        return result
 
     def post(self, path, data):
         self.writes.append(("POST", path, copy.deepcopy(data)))
         if "/statuses/" in path:
             head = path.rsplit("/", 1)[1]
-            result = dict(data, id=self.next_status, creator={"login": "github-actions[bot]", "type": "Bot"})
+            result = dict(data, id=self.next_status, url=f"https://api.github.com/repos/owner/repo/statuses/{head}", creator={"login": "github-actions[bot]", "type": "Bot"})
             self.next_status += 1
-            self.responses[f"/repos/owner/repo/commits/{head}/status?per_page=100&page=1"] = {
-                "sha": head, "statuses": [result]}
+            self.responses[f"/repos/owner/repo/commits/{head}/statuses?per_page=100&page=1"].insert(0, result)
         else:
             result = dict(data, id=200, html_url="https://github.com/owner/repo/pull/7#issuecomment-200",
                           user={"login": "github-actions[bot]", "type": "Bot"})
@@ -46,7 +49,7 @@ class API:
 
     def download(self, repository, source_id, name, destination):
         self.downloads.append((repository, source_id, name))
-        for name, data in self.files.items():
+        for name, data in self.receipts.get((source_id, name), self.files).items():
             path = destination / name
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(data)
@@ -83,7 +86,7 @@ class ControllerTests(unittest.TestCase):
         user = {"id": 42, "login": "maintainer", "type": "User"}
         self.responses = {
             self.prefix + "/actions/runs/123": self.source,
-            self.prefix + "/commits/" + "a" * 40 + "/status?per_page=100&page=1": {"sha": "a" * 40, "statuses": []},
+            self.prefix + "/commits/" + "a" * 40 + "/statuses?per_page=100&page=1": [],
             self.prefix + "/actions/runs/123/artifacts?per_page=100": {"artifacts": [self.artifact]},
             self.prefix + "/pulls/7": self.pr,
             self.prefix + "/git/ref/heads/master": {"object": {"sha": "b" * 40}},
@@ -111,7 +114,7 @@ class ControllerTests(unittest.TestCase):
         return controller.finish(self.state_dir, publication, approval, self.env, self.api)
 
     def check(self):
-        return self.responses[self.prefix + "/commits/" + "a" * 40 + "/status?per_page=100&page=1"]["statuses"][0]
+        return self.responses[self.prefix + "/commits/" + self.source["head_sha"] + "/statuses?per_page=100&page=1"][0]
 
     def comment(self):
         return self.responses[self.prefix + "/issues/comments/200"]
@@ -386,7 +389,7 @@ class ControllerTests(unittest.TestCase):
 
     def test_status_commit_mismatch_cannot_be_overwritten(self):
         self.prepare()
-        self.responses[self.prefix + "/commits/" + "a" * 40 + "/status?per_page=100&page=1"]["sha"] = "b" * 40
+        self.check()["url"] = "https://api.github.com/repos/owner/repo/statuses/" + "b" * 40
         writes = len(self.api.writes)
         with self.assertRaisesRegex(Rejected, "Status commit"):
             self.finish()
