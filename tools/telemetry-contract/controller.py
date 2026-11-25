@@ -178,6 +178,13 @@ def validate_context(api, prefix, state, state_dir, source):
     merge = api.get(f"{prefix}/git/commits/{manifest['merge_sha']}")
     require([parent.get("sha") for parent in merge.get("parents", [])]
             == [manifest["base_sha"], manifest["head_sha"]], "Merge parents do not match the collected base and head.")
+    if delta["version"] == 2:
+        # The collector scripts themselves always come from B. The PR-triggered
+        # entrypoint is also data from the PR, so verify its Git blob before trusting it.
+        path = f"{prefix}/contents/{WORKFLOW}?ref="
+        base_blob = sha(api.get(path + manifest["base_sha"])["sha"], 40, "base workflow blob")
+        require(api.get(path + manifest["merge_sha"])["sha"] == base_blob,
+                "Collection workflow changed; review and install the method separately.")
     # This binds the artifacts to a run; it is not proof that an edited PR
     # workflow was honest. Required CODEOWNERS review protects collector changes.
     manifest["run_attempt"] = 1
@@ -295,6 +302,12 @@ def finish(state_dir, publish_result, approval_result, env, api):
         require(state.get("pr") == manifest["pr"] and state.get("has_changes") == delta["has_changes"],
                 "Prepared report identity changed.")
         if delta["has_changes"]:
+            if delta["version"] == 2:
+                comment = api.get(f"{prefix}/issues/comments/{state['comment_id']}")
+                expected_body = render_comment(review_manifest(manifest, state), delta,
+                                               "reusing" if state.get("reused_approval") else "pending")
+                require(own_comment(comment, manifest, state) and comment["body"] == expected_body,
+                        "The posted report changed after collection.")
             status = "cancelled" if approval_result == "cancelled" else "rejected"
             if state.get("approval_context"):
                 versions = context(api, prefix, manifest, state["controller_sha"])

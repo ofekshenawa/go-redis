@@ -191,6 +191,36 @@ def _bounded(header, body, footer, source_url):
     return header + "".join(kept) + notice + footer
 
 
+def render_findings(manifest, delta):
+    """Compact rows, with full structured before/after values in the source artifact."""
+    rows = []
+    if not isinstance(delta.get("checks"), list):
+        raise ValueError("Missing negative-test results.")
+    for check in delta["checks"]:
+        name, diff = check["name"], check["diff"]
+        lines = []
+        if name == "OTel":
+            for change in _changes({"version": 1, "has_changes": bool(diff), "changes": diff}):
+                if change["entity"] == "metric":
+                    for line in _metric_diff(change)[0]:
+                        if line[0] in "-+":
+                            lines.append(line)
+                else:
+                    for sign, attr in (("-", change["before"]), ("+", change["after"])):
+                        if attr is not None:
+                            line = f"{sign} attribute/label: {_source(attr['name'])} ({_source(attr['type'])})"
+                            lines.append(line)
+        else:
+            lines = ["- " + _source(line) for line in diff]
+        lines = list(dict.fromkeys(lines))
+        # Keep the decision visible above the fold; all lines are in delta.json.
+        shown = [line[:240] + ("…" if len(line) > 240 else "") for line in lines[:8]]
+        if len(lines) > len(shown):
+            shown.append(f"  … {len(lines) - len(shown)} more lines (full diff in artifact)")
+        rows.append(f"**{name}** · {check['result']}" + ("\n" + _diff_block(shown) if shown else "\n\n"))
+    return "".join(rows)
+
+
 def render_comment(manifest, delta, status="pending"):
     """Render Markdown without IO; the publisher must verify hashes and live run/PR state."""
     if status not in STATUSES:
@@ -204,6 +234,15 @@ def render_comment(manifest, delta, status="pending"):
     approval_run = _number(manifest.get("approval_run_id", source_run), "approval run ID")
     source_url = f"https://github.com/{repository}/actions/runs/{source_run}"
     approval_url = f"https://github.com/{repository}/actions/runs/{approval_run}"
+    if delta.get("version") == 2:
+        text = {"pending": "Waiting for one decision on all findings.", "approved": "Approved.",
+                "reused": "Matching human approval reused.", "reusing": "Validating an earlier approval."
+                }.get(status, STATUSES[status])
+        footer = f"[{'Approve or reject this report' if status == 'pending' else 'Review run'}]({approval_url}) · [Full diff and collection log]({source_url})"
+        if manifest.get("reused_approval_run_id"):
+            previous = _number(manifest["reused_approval_run_id"], "original approval run")
+            footer += f" · [Original approval](https://github.com/{repository}/actions/runs/{previous})"
+        return f"{marker}\n## Negative tests\n\n{text} Commit `{head[:12]}`.\n\n" + render_findings(manifest, delta) + footer
     changes = _changes(delta)
     status_text = "No telemetry changes; no telemetry approval needed." if not changes and status == "pending" else STATUSES[status]
     header = (f"{marker}\n## Telemetry contract review\n\n**Status:** {status_text}\n\n"
