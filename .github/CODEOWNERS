@@ -1,1 +1,6 @@
 doctests/* @dmaier-redislabs
+
+# Telemetry collector and approval workflow require owner review.
+/tools/telemetry-contract/ @ofekshenawa
+/.github/workflows/ @ofekshenawa
+/.github/CODEOWNERS @ofekshenawa
