@@ -54,15 +54,28 @@ jobs:
           go test ./...
           python3 -m unittest discover -v -p 'test_*.py'
           go build -o "$RUNNER_TEMP/telemetry-contract" .
-      - name: Extract source contracts without executing client code
+      - name: Extract and compare OTel contracts
+        id: otel
+        continue-on-error: true
         run: |
           mkdir -p report
           "$RUNNER_TEMP/telemetry-contract" -root "$GITHUB_WORKSPACE/base" -output report/base.json
           "$RUNNER_TEMP/telemetry-contract" -root "$GITHUB_WORKSPACE/candidate" -output report/candidate.json
-      - name: Compare contracts
-        id: compare
-        run: |
           "$RUNNER_TEMP/telemetry-contract" -base report/base.json -candidate report/candidate.json -report-dir report
+      - name: Compare the public Go API
+        id: api
+        if: contains(fromJSON('["negative-tests/environment","negative-tests/label","negative-tests/reaction"]'), github.base_ref)
+        continue-on-error: true
+        run: bash base/tools/telemetry-contract/public_api.sh base candidate "$RUNNER_TEMP/api.txt"
+      - name: Assemble the two-check report
+        if: steps.api.outcome != 'skipped'
+        env:
+          OTEL_OUTCOME: ${{ steps.otel.outcome }}
+          API_OUTCOME: ${{ steps.api.outcome }}
+        run: python3 base/tools/telemetry-contract/multi_report.py report "$RUNNER_TEMP/api.txt" "$OTEL_OUTCOME" "$API_OUTCOME"
+      - name: Fail on a legacy collector error
+        if: steps.api.outcome == 'skipped' && steps.otel.outcome != 'success'
+        run: exit 1
       - name: Bind the report to this exact PR candidate
         run: python3 base/tools/telemetry-contract/prepare.py base candidate report
       - name: Save contracts, diff and exact candidate identity
