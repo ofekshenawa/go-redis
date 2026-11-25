@@ -59,7 +59,7 @@ def matches(comment, manifest, delta, mode, effect):
 
 def publish(api, prefix, state, manifest, delta):
     mode = MODES[manifest["base_ref"]]
-    effect = fingerprint(manifest, delta, context(api, prefix, manifest, state["controller_sha"]))
+    effect = fingerprint(manifest, delta, context(api, prefix, manifest, state["controller_sha"], mode=mode))
     pr, origin = manifest["pr"], state["source_run_id"]
     history = (c for c in pages(api, f"{prefix}/issues/{pr}/comments")
                if bot(c.get("user", {})) and MARKER.match(c.get("body", "")))
@@ -121,7 +121,7 @@ def reconcile(api, prefix, state, manifest, delta, *, poll=False):
     mode, effect = state["decision_mode"], state["fingerprint"]
     require(MODES.get(manifest["base_ref"]) == mode and delta["version"] == 2 and delta["has_changes"],
             "Unexpected decision mode or report.")
-    require(fingerprint(manifest, delta, context(api, prefix, manifest, state["controller_sha"])) == effect,
+    require(fingerprint(manifest, delta, context(api, prefix, manifest, state["controller_sha"], mode=mode)) == effect,
             "Approval policy or report changed; start a new collection.")
     attempts = 5 if mode == "reaction" and poll else 1
     for attempt in range(attempts):
