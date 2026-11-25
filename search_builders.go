@@ -648,9 +648,9 @@ type ExplainBuilder struct {
 	options *FTExplainOptions
 }
 
-// NewExplainBuilder creates a new ExplainBuilder for FT.EXPLAIN commands.
+// ExplainBuilderFor creates a new ExplainBuilder for FT.EXPLAIN commands.
 // EXPERIMENTAL: this API is subject to change, use with caution.
-func (c *Client) NewExplainBuilder(ctx context.Context, index, query string) *ExplainBuilder {
+func (c *Client) ExplainBuilderFor(ctx context.Context, index, query string) *ExplainBuilder {
 	return &ExplainBuilder{c: c, ctx: ctx, index: index, query: query, options: &FTExplainOptions{}}
 }
 
