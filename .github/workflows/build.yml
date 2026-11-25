@@ -1,29 +1,48 @@
-name: Negative-test approval evidence spike
+name: Negative-test unauthorized actor probe
 on: workflow_dispatch
 permissions:
+  contents: read
   issues: write
-  pull-requests: write
 jobs:
   probe:
     runs-on: ubuntu-latest
-    timeout-minutes: 4
+    timeout-minutes: 3
     steps:
-      - name: Inspect a report reaction and a diagnostic label
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: 2396228c817ac250d3b6e71e5e8b94be089dcbd5
+          persist-credentials: false
+      - name: Verify production rules reject bot reaction and bot removal on a disposable issue
         env:
-          GH_TOKEN: ${{ github.token }}
-          REPO: ${{ github.repository }}
+          GITHUB_TOKEN: ${{ github.token }}
+          PYTHONPATH: tools/telemetry-contract
         run: |
-          set -euo pipefail
-          root="repos/$REPO"
-          label="spike-$GITHUB_RUN_ID"
-          gh api -X POST "$root/labels" -f name="$label" -f color=aaaaaa --silent
-          gh api -X POST "$root/issues/19/labels" -f "labels[]=$label" --silent
-          gh api -X DELETE "$root/issues/19/labels/$label" --silent
-          comment=$(gh api -X POST "$root/issues/20/comments" -f body="Approval mechanism probe (run $GITHUB_RUN_ID). This comment cannot authorize a merge." --jq .id)
-          for attempt in 1 2; do
-            found=$(gh api "$root/issues/comments/$comment/reactions?content=%2B1" --jq length)
-            printf 'Reaction read %s: %s thumbs-up at %s\n' "$attempt" "$found" "$(date -u +%FT%TZ)" >> "$GITHUB_STEP_SUMMARY"
-            if [ "$attempt" = 1 ]; then sleep 15; fi
-          done
-          gh api --paginate "$root/issues/19/timeline?per_page=100" | jq -r --arg label "$label" '.[] | select(.label.name==$label) | [.event,.label.name,.actor.login,.actor.type,.id,.created_at] | @tsv' >> "$GITHUB_STEP_SUMMARY"
-          gh api -X DELETE "$root/labels/$label" --silent
+          python3 - <<'PY'
+          import os
+          from alternative_gate import BOT, label_approval, label_name, reaction_approval
+          from gate import GitHub
+          api = GitHub(os.environ["GITHUB_TOKEN"])
+          prefix = "/repos/" + os.environ["GITHUB_REPOSITORY"]
+          origin = int(os.environ["GITHUB_RUN_ID"])
+          issue = api.post(f"{prefix}/issues", {"title":"Negative tests · bot authorization probe",
+                           "body":"Disposable evidence for the reaction and label decision rules. No merge is associated with this issue."})
+          pr = issue["number"]
+          name = label_name(pr, origin)
+          try:
+              comment = api.post(f"{prefix}/issues/{pr}/comments", {"body":"Disposable authorization target for this Actions run."})
+              reaction = api.post(f"{prefix}/issues/comments/{comment['id']}/reactions", {"content":"+1"})
+              assert reaction["user"]["type"] == "Bot" and reaction["user"]["login"] == BOT
+              assert reaction_approval(api, prefix, {"comment_id":comment["id"]}) is None
+              label = api.post(f"{prefix}/labels", {"name":name, "color":"b60205"})
+              state = {"origin":origin,"pr":pr,"label_id":label["id"]}
+              api.post(f"{prefix}/issues/{pr}/labels", {"labels":[name]})
+              api.run("api", "-X", "DELETE", f"{prefix}/issues/{pr}/labels/{name}")
+              assert label_approval(api, prefix, state) is None
+              assert any(item["id"]==label["id"] for item in api.get(f"{prefix}/issues/{pr}/labels"))
+              message = f"Bot thumbs-up rejected. Bot label removal rejected and label restored. Evidence: {issue['html_url']}."
+              print(message)
+              with open(os.environ["GITHUB_STEP_SUMMARY"],"a") as summary:
+                  print(message, file=summary)
+          finally:
+              api.patch(f"{prefix}/issues/{pr}", {"state":"closed"})
+          PY
