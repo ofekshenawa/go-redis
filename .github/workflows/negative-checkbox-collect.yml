@@ -1,0 +1,13 @@
+name: Negative tests - checkbox collection
+
+on:
+  pull_request:
+    branches: [negative-tests/checkbox]
+    types: [opened, synchronize, reopened, edited]
+
+permissions:
+  contents: read
+
+jobs:
+  collect:
+    uses: ./.github/workflows/telemetry-contract.yml
