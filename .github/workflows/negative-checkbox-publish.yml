@@ -1,0 +1,56 @@
+name: Negative tests - publish checkbox report
+on:
+  workflow_run:
+    workflows: [Negative tests - checkbox collection]
+    types: [completed]
+permissions: {}
+jobs:
+  locate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
+    outputs:
+      pr: ${{ steps.lookup.outputs.pr }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+      - id: lookup
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 tools/negative-checkbox/checkbox_gate.py locate
+
+  publish:
+    needs: locate
+    concurrency:
+      group: checkbox-report-${{ needs.locate.outputs.pr }}
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: write
+      issues: write
+      statuses: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+      - id: report
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PR: ${{ needs.locate.outputs.pr }}
+        run: python3 tools/negative-checkbox/checkbox_gate.py publish
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        if: steps.report.outputs.state_name != ''
+        with:
+          name: ${{ steps.report.outputs.state_name }}
+          path: report-state/
+          if-no-files-found: error
+          retention-days: 30

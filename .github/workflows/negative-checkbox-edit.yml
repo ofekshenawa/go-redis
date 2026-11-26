@@ -1,0 +1,46 @@
+name: Negative tests - verify checkbox edit
+on:
+  issue_comment:
+    types: [edited]
+permissions: {}
+jobs:
+  verify:
+    if: >-
+      github.event.issue.pull_request &&
+      github.event.comment.user.login == 'github-actions[bot]' &&
+      github.event.sender.type == 'User' &&
+      (startsWith(github.event.changes.body.from, '<!-- negative-tests:checkbox ') ||
+       startsWith(github.event.comment.body, '<!-- negative-tests:checkbox '))
+    concurrency:
+      group: checkbox-report-${{ github.event.issue.number }}
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: read
+      contents: read
+      issues: write
+      pull-requests: write
+      statuses: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+      - name: Verify the editor, active report and exact checkbox edit
+        id: event
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 tools/negative-checkbox/checkbox_gate.py inspect
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        if: steps.event.outputs.receipt != ''
+        with:
+          name: ${{ steps.event.outputs.receipt }}
+          path: decision.json
+          if-no-files-found: error
+          retention-days: 30
+      - name: Revalidate the persisted decision and update the PR
+        if: steps.event.outputs.receipt != ''
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 tools/negative-checkbox/checkbox_gate.py apply
