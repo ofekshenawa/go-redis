@@ -1,10 +1,11 @@
 name: Telemetry contract
 
 on:
+  workflow_call:
   pull_request:
     # The infrastructure branch hosts the approval policy. The method PR
     # installs the first scanner and is validated by otel-method.yml.
-    branches-ignore: [negative-tests/infrastructure]
+    branches-ignore: [negative-tests/infrastructure, negative-tests/checkbox]
     types: [opened, synchronize, reopened, edited]
 
 permissions:
@@ -64,7 +65,7 @@ jobs:
           "$RUNNER_TEMP/telemetry-contract" -base report/base.json -candidate report/candidate.json -report-dir report
       - name: Compare the public Go API
         id: api
-        if: contains(fromJSON('["negative-tests/environment","negative-tests/label","negative-tests/reaction"]'), github.base_ref)
+        if: contains(fromJSON('["negative-tests/environment","negative-tests/label","negative-tests/reaction","negative-tests/checkbox"]'), github.base_ref)
         continue-on-error: true
         run: bash base/tools/telemetry-contract/public_api.sh base candidate "$RUNNER_TEMP/api.txt"
       - name: Assemble the two-check report

@@ -37,7 +37,10 @@ def prepare(base, candidate, report):
     (report / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
     with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as summary:
         summary.write((report / "report.md").read_text())
-        summary.write("\n\n**Review:** the separate **Telemetry review** workflow will post this diff in the PR conversation. Follow the link in that comment to **Review deployments → telemetry-review**, then approve or reject. Nothing is deployed.\n\n")
+        if pr["base"]["ref"] == "negative-tests/checkbox":
+            summary.write("\n\n**Review:** choose Approve or Reject on the bot's PR report.\n\n")
+        else:
+            summary.write("\n\n**Review:** the separate **Telemetry review** workflow will post this diff in the PR conversation. Follow the link in that comment to **Review deployments → telemetry-review**, then approve or reject. Nothing is deployed.\n\n")
         summary.write("<details><summary>Compared commits and report identity</summary>\n\n")
         summary.write(f"Base: `{parents[0]}`\n\nPR head: `{parents[1]}`\n\nMerge candidate: `{sha}`\n\n")
         summary.write(f"Report SHA-256: `{manifest['report_sha256']}`\n\n")
