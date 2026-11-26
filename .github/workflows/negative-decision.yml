@@ -1,11 +1,13 @@
 name: Recheck negative tests
 on:
+  # A manual recheck can pick up a thumbs-up left after the initial polling window.
   workflow_dispatch:
     inputs:
       pr:
         description: Pull request number shown on the report
         type: string
         required: true
+  # Removing a report label supplies an event the verifier can check immediately.
   pull_request_target:
     branches: [negative-tests/label]
     types: [unlabeled]
@@ -28,6 +30,7 @@ jobs:
       group: negative-decision-${{ github.event.number || inputs.pr }}
       cancel-in-progress: false
     steps:
+      # This job can update PRs and statuses. Only repository-controlled code runs here.
       - name: Load the trusted verifier from the default branch
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:

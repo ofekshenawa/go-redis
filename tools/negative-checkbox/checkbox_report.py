@@ -19,6 +19,7 @@ MAX_LINE = 260
 
 
 def _otel_lines(changes):
+    """Format OTel changes by metric, then include any remaining attribute declarations."""
     changes = _changes({"version": 1, "has_changes": bool(changes), "changes": changes})
     attached = {"-": set(), "+": set()}
     lines = []
@@ -54,6 +55,7 @@ def _otel_lines(changes):
 
 
 def _preview(lines):
+    """Limit one check's visible diff and indicate when the full report contains more text."""
     shown = [line if len(line) <= MAX_LINE else line[:MAX_LINE] + "… (full line in report)"
              for line in lines[:MAX_LINES_PER_CHECK]]
     if len(lines) > len(shown):
@@ -62,7 +64,10 @@ def _preview(lines):
 
 
 def render(manifest, delta, decision=None, reviewer=None, decision_run_id=None):
-    """The full report always remains available in the linked collection run."""
+    """Render the canonical diff and either two empty checkboxes or the reviewer's decision.
+
+    The verifier regenerates this text to match the edited comment to the exact report.
+    """
     marker = MARKER + comment_marker(manifest).removeprefix(COMMENT_PREFIX)
     repo = manifest["repository"]
     if not re.fullmatch(r"[A-Za-z0-9-]+/[A-Za-z0-9_.-]+", repo):
@@ -90,7 +95,7 @@ def render(manifest, delta, decision=None, reviewer=None, decision_run_id=None):
 
 
 def edited_decision(expected, before, after):
-    """Accept one checkbox tick, preserving all text and the order of its lines."""
+    """Return approve or reject only when a tick is the sole change to the canonical report."""
     if not all(isinstance(body, str) for body in (expected, before, after)):
         return None
     # Markdown from GitHub's browser editor can use CRLF; only a uniform

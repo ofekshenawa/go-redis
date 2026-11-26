@@ -1,10 +1,12 @@
 name: Negative tests - verify checkbox edit
 on:
+  # Ticking a GitHub task box edits the existing bot comment and emits this event.
   issue_comment:
     types: [edited]
 permissions: {}
 jobs:
   verify:
+    # Compare both comment bodies so the verifier can also restore invalid human edits.
     if: >-
       github.event.issue.pull_request &&
       github.event.comment.user.login == 'github-actions[bot]' &&
@@ -32,6 +34,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: python3 tools/negative-checkbox/checkbox_gate.py inspect
+      # Persist the verified decision for the final check and future approval reuse.
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         if: steps.event.outputs.receipt != ''
         with:

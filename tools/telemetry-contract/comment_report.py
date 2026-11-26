@@ -20,19 +20,21 @@ STATUSES = {
 
 
 def _number(value, field):
+    """Return a positive GitHub ID or attempt number that fits in a signed 64-bit integer."""
     if type(value) is not int or not 0 < value < 2**63:
         raise ValueError(f"Invalid {field}.")
     return value
 
 
 def _sha(value, size, field):
+    """Validate a hexadecimal commit or report digest and return it in lowercase."""
     if not isinstance(value, str) or not re.fullmatch(rf"[0-9a-fA-F]{{{size}}}", value):
         raise ValueError(f"Invalid {field}.")
     return value.lower()
 
 
 def comment_marker(manifest):
-    """Stable identity across status updates, scoped to source run, attempt and delta."""
+    """Identify this report by collection run, attempt and delta digest across comment updates."""
     run = _number(manifest.get("run_id"), "collection run ID")
     attempt = _number(manifest.get("run_attempt", 1), "run attempt")
     digest = _sha(manifest.get("delta_sha256"), 64, "delta hash")
@@ -40,7 +42,7 @@ def comment_marker(manifest):
 
 
 def _source(value):
-    """One literal code line, with no fence delimiters, mentions or invisible controls."""
+    """Escape a source string for a single diff line, including Markdown delimiters and mentions."""
     if not isinstance(value, str):
         raise ValueError("Telemetry names, types and units must be strings.")
     quoted = json.dumps(value, ensure_ascii=False)[1:-1]
@@ -55,6 +57,7 @@ def _source(value):
 
 
 def _attribute(value):
+    """Read the (name, type) pair from a structured attribute or label declaration."""
     if not isinstance(value, dict):
         raise ValueError("Invalid attribute declaration.")
     name, kind = value.get("name"), value.get("type")
@@ -64,6 +67,7 @@ def _attribute(value):
 
 
 def _metric(value):
+    """Validate a metric definition and return its distinct (name, type) attribute pairs."""
     if not isinstance(value, dict):
         raise ValueError("Invalid metric.")
     for key in ("package", "name", "instrument", "unit"):
@@ -78,6 +82,7 @@ def _metric(value):
 
 
 def _changes(delta):
+    """Validate a v1 delta and return changes whose before and after values match their actions."""
     if not isinstance(delta, dict) or delta.get("version") != 1 or type(delta.get("version")) is not int:
         raise ValueError("Unsupported telemetry delta.")
     changes = delta.get("changes")
@@ -100,6 +105,7 @@ def _changes(delta):
 
 
 def _field(lines, label, before, after):
+    """Append context for an unchanged field or signed diff lines for the old and new values."""
     if before == after:
         lines.append(f"  {label}: {_source(before) or '(none)'}")
     else:
@@ -110,6 +116,7 @@ def _field(lines, label, before, after):
 
 
 def _metric_diff(change):
+    """Return the field diff and the removed and added attributes for one metric change."""
     before, after = change["before"], change["after"]
     lines = []
     for label, key in (("metric", "name"), ("instrument", "instrument"), ("unit", "unit")):
@@ -129,11 +136,14 @@ def _metric_diff(change):
 
 
 def _diff_block(lines):
+    """Wrap prepared lines in a Markdown diff block for GitHub to color."""
     return "```diff\n" + "\n".join(lines) + "\n```\n\n"
 
 
 def _change_order(change):
+    """Sort metric changes by action and definitions so input ordering cannot reorder the comment."""
     def definition(value):
+        """Build a comparable key for a metric definition, including its sorted attributes."""
         if value is None:
             return ()
         return (value["package"], value["name"], value["instrument"], value["unit"],
@@ -143,6 +153,7 @@ def _change_order(change):
 
 
 def _body(changes):
+    """Group changes by metric and list any attribute declarations not already shown with them."""
     groups = defaultdict(list)
     shown_removed, shown_added = set(), set()
     for change in changes:
@@ -173,6 +184,7 @@ def _body(changes):
 
 
 def _bounded(header, body, footer, source_url):
+    """Fit the legacy report into one comment, preserving complete lines and a link to the full diff."""
     if len(header) + len(body) + len(footer) <= MAX_COMMENT_CHARS:
         return header + body + footer
     notice = ("\n**Report truncated:** Some changes are omitted from this comment. "
@@ -192,7 +204,7 @@ def _bounded(header, body, footer, source_url):
 
 
 def render_findings(manifest, delta):
-    """Compact rows, with full structured before/after values in the source artifact."""
+    """Build a short diff for each v2 check. The collection artifact retains every finding."""
     rows = []
     if not isinstance(delta.get("checks"), list):
         raise ValueError("Missing negative-test results.")
@@ -222,7 +234,7 @@ def render_findings(manifest, delta):
 
 
 def render_comment(manifest, delta, status="pending"):
-    """Render Markdown without IO; the publisher must verify hashes and live run/PR state."""
+    """Build the Markdown that the publisher posts and later compares with the reviewer's copy."""
     if status not in STATUSES:
         raise ValueError("Unsupported telemetry comment status.")
     marker = comment_marker(manifest)

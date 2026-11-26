@@ -18,11 +18,13 @@ class Rejected(Exception):
 
 
 def require(condition, reason):
+    """Raise Rejected with the supplied reason when a gate condition fails."""
     if not condition:
         raise Rejected(reason)
 
 
 def number(value, field):
+    """Parse a positive integer ID or attempt number, rejecting booleans and malformed values."""
     require(not isinstance(value, bool) and str(value).isdigit(), f"Invalid {field}.")
     result = int(value)
     require(result > 0, f"Invalid {field}.")
@@ -30,12 +32,14 @@ def number(value, field):
 
 
 def sha(value, length, field):
+    """Validate a lowercase hexadecimal Git object ID or digest of the expected length."""
     require(isinstance(value, str) and re.fullmatch(r"[0-9a-f]{%d}" % length, value),
             f"Invalid {field}.")
     return value
 
 
 def json_file(path):
+    """Read a size-limited artifact and return its parsed JSON and original bytes for hashing."""
     try:
         data = Path(path).read_bytes()
         require(len(data) <= 20 * 1024 * 1024, "Artifact is too large.")
@@ -47,10 +51,12 @@ def json_file(path):
 class GitHub:
     """Delegate API authentication, HTTP and artifact downloads to GitHub CLI."""
     def __init__(self, token):
+        """Configure noninteractive GitHub CLI calls with the workflow's token."""
         require(bool(token), "GITHUB_TOKEN is required.")
         self.env = dict(os.environ, GH_TOKEN=token, GH_HOST="github.com", GH_PROMPT_DISABLED="1")
 
     def run(self, *args, data=None):
+        """Run a GitHub CLI command and return stdout, keeping CLI error output out of the review."""
         try:
             result = subprocess.run(["gh", *args], input=data, text=True, capture_output=True,
                                     env=self.env, timeout=120, check=True)
@@ -60,6 +66,7 @@ class GitHub:
             raise Rejected("GitHub CLI request failed or timed out.") from None
 
     def request(self, method, path, data=None):
+        """Send a repository API request via the GitHub CLI and decode its JSON response."""
         require(path.startswith("/repos/") and not path.startswith("//"), "Invalid API path.")
         args = ["api", "--hostname", "github.com", "--method", method, path,
                 "-H", "X-GitHub-Api-Version: 2022-11-28"]
@@ -71,20 +78,29 @@ class GitHub:
             raise Rejected("Invalid GitHub API response.") from None
 
     def get(self, path):
+        """Fetch a repository API resource and return its decoded JSON."""
         return self.request("GET", path)
 
     def post(self, path, data):
+        """Send a JSON payload to a repository API endpoint and return its response."""
         return self.request("POST", path, data)
 
     def patch(self, path, data):
+        """Update a repository API resource and return its decoded response."""
         return self.request("PATCH", path, data)
 
     def download(self, repository, source_id, name, destination):
+        """Extract one named artifact from the specified workflow run into the destination directory."""
         self.run("run", "download", str(source_id), "--repo", "github.com/" + repository,
                  "--name", name, "--dir", str(destination))
 
 
 def validate_artifacts(manifest_path, delta_path, report_path, env):
+    """Return the manifest and delta after verifying their run identity and the report hashes.
+
+    Check the applicable report format, including required test results for multi-check
+    targets. A collection error makes the report ineligible for approval.
+    """
     manifest, _ = json_file(manifest_path)
     delta, delta_bytes = json_file(delta_path)
     require(isinstance(manifest, dict), "Invalid manifest.")
@@ -128,6 +144,10 @@ def validate_artifacts(manifest_path, delta_path, report_path, env):
 
 
 def validate_rows(delta):
+    """Require both configured checks and verify that each outcome agrees with its findings.
+
+    An error from either check blocks the report even if the other check passed.
+    """
     rows = delta.get("checks")
     require(type(delta.get("has_changes")) is bool and isinstance(rows, list)
             and all(isinstance(row, dict) for row in rows)
@@ -148,6 +168,7 @@ def validate_rows(delta):
 
 
 def validate_telemetry(delta):
+    """Validate the original telemetry-only report and its summary of whether anything changed."""
     require(isinstance(delta, dict) and delta.get("version") == 1
             and isinstance(delta.get("has_changes"), bool)
             and isinstance(delta.get("changes"), list), "Invalid telemetry delta.")
@@ -156,6 +177,7 @@ def validate_telemetry(delta):
 
 
 def validate_changes(changes):
+    """Require each telemetry finding to identify an entity, action, and before/after fields."""
     for change in changes:
         require(isinstance(change, dict)
                 and change.get("entity") in ("metric", "attribute_declaration")
@@ -167,6 +189,11 @@ def validate_changes(changes):
 
 
 def current_candidate(api, prefix, manifest):
+    """Require the live PR head, target branch, base tip, and merge candidate to match the report.
+
+    A push, retarget, or base update can make the collected candidate stale while a
+    reviewer is reading the findings.
+    """
     pr = api.get(f"{prefix}/pulls/{manifest['pr']}")
     require(isinstance(pr, dict), "Invalid PR response.")
     require(pr.get("state") == "open", "PR is no longer open.")
@@ -184,6 +211,11 @@ def current_candidate(api, prefix, manifest):
 
 
 def approved_reviewer(api, prefix, run_id):
+    """Return the login of an authorized human who approved this run's protected Environment.
+
+    Match the Environment ID in GitHub's review history and check the reviewer's
+    current repository role. Reject the decision if no matching approval qualifies.
+    """
     environment = api.get(f"{prefix}/environments/{ENVIRONMENT}")
     require(isinstance(environment, dict) and environment.get("name") == ENVIRONMENT,
             "The telemetry-review Environment is not configured.")
@@ -206,6 +238,7 @@ def approved_reviewer(api, prefix, run_id):
 
 
 def reviewer_login(api, prefix, user):
+    """Return a confirmed admin or maintainer login, or None if the identity or role does not match."""
     if not isinstance(user, dict) or user.get("type") != "User":
         return None
     login = user.get("login")

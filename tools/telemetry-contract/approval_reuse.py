@@ -18,6 +18,7 @@ INVALID = (Rejected, ValueError, KeyError, TypeError, AttributeError, OSError)
 
 
 def canonical(value, field=""):
+    """Normalize report data for comparison, sorting change, attribute, and label lists recursively."""
     if isinstance(value, dict):
         return {key: canonical(item, key) for key, item in value.items()}
     if isinstance(value, list):
@@ -27,15 +28,20 @@ def canonical(value, field=""):
 
 
 def encoded(value):
+    """Serialize a value as compact JSON with sorted object keys for deterministic hashing."""
     return json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False)
 
 
 def digest(value):
+    """Return the SHA-256 digest of the deterministic JSON encoding of a value."""
     return hashlib.sha256(encoded(value).encode()).hexdigest()
 
 
 def code_version(api, prefix, revision, collecting=True):
-    """Hash relevant file contents/modes, never the repository commit itself."""
+    """Hash the relevant tool and workflow files using their Git blob IDs and modes.
+
+    Unrelated source changes can then leave the approval context unchanged.
+    """
     sha(revision, 40, "code revision")
     commit = api.get(f"{prefix}/git/commits/{revision}")
     tree_sha = sha(commit["tree"]["sha"], 40, "code tree")
@@ -65,6 +71,11 @@ def code_version(api, prefix, revision, collecting=True):
 
 
 def context(api, prefix, manifest, controller_sha, *, mode="environment"):
+    """Capture the tool revisions and approval settings that must match to reuse a decision.
+
+    An Environment decision includes its reviewer configuration. Reaction and label
+    decisions include the method and required repository roles.
+    """
     collectors = {manifest["base_sha"], manifest["merge_sha"]}
     versions = {revision: code_version(api, prefix, revision, collecting=revision in collectors)
                 for revision in collectors | {controller_sha}}
@@ -85,16 +96,25 @@ def context(api, prefix, manifest, controller_sha, *, mode="environment"):
 
 
 def fingerprint(manifest, delta, versions):
+    """Identify the exact findings and approval context for a PR and its target branch.
+
+    A fresh collection after a rebase can match the same fingerprint when these inputs agree.
+    """
     return digest({"repository": manifest["repository"], "pr": manifest["pr"],
                    "base_ref": manifest["base_ref"], "context": versions, "delta": canonical(delta)})
 
 
 def artifact_name(manifest, value):
+    """Build the approval artifact name for this PR and change fingerprint."""
     return f"telemetry-approval-{number(manifest['pr'], 'PR')}-{sha(value, 64, 'fingerprint')}"
 
 
 def verified_approval(api, prefix, artifact_id, current, manifest, delta):
-    """Verify the original manual run; reused/merely green runs are not evidence."""
+    """Recheck an earlier manual review and return its artifact ID, run ID, and reviewer.
+
+    Require the saved findings and policy to match the current report. A run that
+    itself reused an approval cannot supply evidence of a human decision.
+    """
     artifact = api.get(f"{prefix}/actions/artifacts/{number(artifact_id, 'approval artifact')}")
     require(artifact.get("id") == artifact_id and artifact.get("name") == current["approval_artifact"]
             and artifact.get("expired") is False and 0 < artifact.get("size_in_bytes", 0) <= MAX_BYTES,
@@ -148,7 +168,10 @@ def verified_approval(api, prefix, artifact_id, current, manifest, delta):
 
 
 def find_approval(api, prefix, current, manifest, delta):
-    """Missing/unverifiable historical evidence requests a fresh manual approval."""
+    """Return verified evidence from the newest matching artifact, or None to request a fresh review.
+
+    An invalid or incomplete lookup cannot reinstate an older decision.
+    """
     try:
         listing = api.get(f"{prefix}/actions/artifacts?name={current['approval_artifact']}&per_page=20")
         candidates = listing["artifacts"]

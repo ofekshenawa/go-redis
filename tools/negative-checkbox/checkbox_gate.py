@@ -25,12 +25,13 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 def belongs(pr, head, fork):
+    """Return whether this open checkbox PR still has the collected head commit and source repository."""
     return (pr.get("state") == "open" and pr["base"]["ref"] == TARGET
             and pr["head"]["sha"] == head and pr["head"]["repo"]["id"] == fork)
 
 
 def locate(api, prefix, source):
-    """Use GitHub's PR association, including fork runs with an empty association list."""
+    """Find the unique open PR for this collection, using the head commit when GitHub omits fork PRs."""
     require(source["event"] == "pull_request" and source["path"] == COLLECT
             and source["name"] == "Negative tests - checkbox collection", "Unexpected collector.")
     head, fork = source["head_sha"], number(source["head_repository"]["id"], "head repository")
@@ -46,6 +47,7 @@ def locate(api, prefix, source):
 
 
 def checkbox_policy():
+    """Return the Git tree entries that version the trusted checkbox workflows and verifier."""
     # Legacy guards hash their own tool directory. Hash the fourth method's new
     # trusted files separately, by content, so an unrelated rebase is reusable.
     return subprocess.check_output(
@@ -55,6 +57,10 @@ def checkbox_policy():
 
 
 def validated(api, prefix, state, folder, source):
+    """Return the manifest, findings and fingerprint after validating the collection and current PR.
+
+    The fingerprint includes the check definitions and approval policy used for these findings.
+    """
     require(source["status"] == "completed" and source["conclusion"] == "success"
             and source["run_attempt"] == 1, "Collection failed or was rerun.")
     manifest, delta = validate_context(api, prefix, state, folder, source)
@@ -74,6 +80,7 @@ def validated(api, prefix, state, folder, source):
 
 
 def indicator(api, prefix, pr, present):
+    """Show or clear the needs-review label to reflect the report state for readers of the PR."""
     path = f"{prefix}/issues/{pr}/labels"
     # Labels are names returned by GitHub. Never infer any decision from them.
     labels = api.get(f"{prefix}/pulls/{pr}")["labels"]
@@ -84,6 +91,7 @@ def indicator(api, prefix, pr, present):
 
 
 def matching_run(api, prefix, repo, run_id, event, path):
+    """Require the expected successful first attempt of a trusted workflow in this repository."""
     run = source_run(api, prefix, run_id, repo)
     require(run["head_repository"]["full_name"] == repo and run["event"] == event and run["path"] == path
             and run["run_attempt"] == 1 and run["status"] == "completed" and run["conclusion"] == "success",
@@ -92,11 +100,16 @@ def matching_run(api, prefix, repo, run_id, event, path):
 
 
 def receipt_name(pr):
+    """Name the artifact used to find the most recent checkbox decision for this PR."""
     return f"checkbox-decision-pr-{pr}"
 
 
 def reusable(api, prefix, state, manifest, delta, effect):
-    """Recheck the most recent actual human decision for this PR against the new report."""
+    """Return the latest receipt only if it still proves a human approval for these findings.
+
+    Recheck the original run, comment and reviewer's current role. An expired receipt,
+    a later rejection or changed findings require a fresh decision.
+    """
     repo, pr = state["repository"], state["pr"]
     name = receipt_name(pr)
     listing = api.get(f"{prefix}/actions/artifacts?name={name}&per_page=50")
@@ -131,6 +144,11 @@ def reusable(api, prefix, state, manifest, delta, effect):
 
 
 def publish(api, prefix, state, source, folder):
+    """Validate a completed collection and set the merge status for its PR head.
+
+    Post a fresh checkbox comment and save its ID for findings needing review. A clean
+    report or a verified prior approval clears the gate. Collection errors fail it.
+    """
     require(locate(api, prefix, source) == state["pr"], "The collection has been superseded.")
     state.update(source_head_sha=source["head_sha"], source_run_id=source["id"])
     state["status_id"] = number(start_status(api, prefix, state)["id"], "status ID")
@@ -161,6 +179,10 @@ def publish(api, prefix, state, source, folder):
 
 
 def restore(api, prefix, repo, pr, folder):
+    """Reload the trusted publisher's state for the pending status on the current PR head.
+
+    Return None when there is no pending report. Reject state linked to another candidate.
+    """
     live = api.get(f"{prefix}/pulls/{pr}")
     require(live["state"] == "open" and live["base"]["ref"] == TARGET, "Not an open checkbox demo.")
     head = sha(live["head"]["sha"], 40, "live head")
@@ -182,7 +204,11 @@ def restore(api, prefix, repo, pr, folder):
 
 
 def decide(api, prefix, repo, edit_id, event, folder):
-    """Verify the human edit twice: before persisting its receipt and before publishing its status."""
+    """Return the publisher state and decision receipt for an authorized edit to its active comment.
+
+    Ignore stale events. Restore the open report after an invalid or unauthorized edit.
+    The workflow calls this before saving the receipt and again before applying it.
+    """
     if (event.get("action") != "edited" or not event["issue"].get("pull_request")
             or event["repository"]["full_name"] != repo or not bot(event["comment"]["user"])
             or event["sender"].get("type") != "User"):
@@ -219,6 +245,7 @@ def decide(api, prefix, repo, edit_id, event, folder):
 
 
 def apply(api, prefix, state, receipt):
+    """Record the verified decision on the label and comment, then update the current head's status."""
     pr, cid, decision = receipt["pr"], receipt["comment"], receipt["decision"]
     login, edit_id = receipt["actor"]["login"], receipt["edit_run"]
     current_candidate(api, prefix, receipt["manifest"])
@@ -234,6 +261,7 @@ def apply(api, prefix, state, receipt):
 
 
 def main():
+    """Route collection completions to publication and comment edits to receipt inspection or application."""
     action = sys.argv[1]
     state = identity(os.environ)
     repo, edit_id = state["repository"], state["controller_run_id"]

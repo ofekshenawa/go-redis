@@ -13,6 +13,7 @@ BOT = "github-actions[bot]"
 
 
 def pages(api, path):
+    """Yield paginated GitHub evidence. Raise if ten full pages leave completeness uncertain."""
     separator = "&" if "?" in path else "?"
     for page in range(1, 11):
         rows = api.get(f"{path}{separator}per_page=100&page={page}")
@@ -24,10 +25,12 @@ def pages(api, path):
 
 
 def label_name(pr, source):
+    """Name the review label for this PR and collection run so two reports have distinct targets."""
     return f"review-{pr}-{source}"
 
 
 def body(manifest, delta, mode, effect, origin, label_id):
+    """Build the canonical comment tying the visible diff and action to this report's fingerprint."""
     url = f"https://github.com/{manifest['repository']}/actions/runs/{origin}"
     if mode == "reaction":
         action = ("React 👍 **on this comment** to approve both rows. The initial run checks every "
@@ -43,10 +46,12 @@ def body(manifest, delta, mode, effect, origin, label_id):
 
 
 def bot(actor):
+    """Return whether GitHub identifies the actor as the Actions bot used by the publisher."""
     return actor.get("type") == "Bot" and actor.get("login") == BOT
 
 
 def matches(comment, manifest, delta, mode, effect):
+    """Recover the source run and label ID from an unedited bot comment matching this report."""
     match = MARKER.match(comment.get("body", ""))
     if not match or not bot(comment.get("user", {})) or match.groups()[:2] != (mode, effect):
         return None
@@ -58,6 +63,11 @@ def matches(comment, manifest, delta, mode, effect):
 
 
 def publish(api, prefix, state, manifest, delta):
+    """Reuse the latest matching comment or create a fresh decision target.
+
+    Return the identifiers the verifier needs to find the comment and, for label reviews,
+    the repository label. The label verifier handles attaching the label to the PR.
+    """
     mode = MODES[manifest["base_ref"]]
     effect = fingerprint(manifest, delta, context(api, prefix, manifest, state["controller_sha"], mode=mode))
     pr, origin = manifest["pr"], state["source_run_id"]
@@ -83,6 +93,7 @@ def publish(api, prefix, state, manifest, delta):
 
 
 def reaction_approval(api, prefix, state):
+    """Return the reviewer and reaction ID of an authorized thumbs-up on this report, if present."""
     path = f"{prefix}/issues/comments/{state['comment_id']}/reactions?content=%2B1"
     for reaction in pages(api, path):
         if reaction.get("content") == "+1":
@@ -93,6 +104,11 @@ def reaction_approval(api, prefix, state):
 
 
 def label_approval(api, prefix, state):
+    """Return evidence of an authorized removal of this report's label.
+
+    An absent label must have a matching bot attachment and human removal in the PR
+    timeline. When that evidence is missing, restore the blocking label.
+    """
     pr = state["pr"]
     name = label_name(pr, state["origin"])
     repo_label = api.get(f"{prefix}/labels/{name}")
@@ -117,6 +133,11 @@ def label_approval(api, prefix, state):
 
 
 def reconcile(api, prefix, state, manifest, delta, *, poll=False):
+    """Recheck the report, candidate and human evidence before writing a commit status.
+
+    Label checks read once. Reaction polling can retry briefly. If no authorized decision
+    is found, leave the current report pending.
+    """
     from controller import conclude, status_identity
     mode, effect = state["decision_mode"], state["fingerprint"]
     require(MODES.get(manifest["base_ref"]) == mode and delta["version"] == 2 and delta["has_changes"],

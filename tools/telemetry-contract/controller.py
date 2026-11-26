@@ -23,6 +23,7 @@ STATUS_CONTEXT = "Negative tests / telemetry-contract"
 
 
 def identity(env):
+    """Read the repository, run ID, and trusted workflow revision from a first-attempt controller run."""
     repository = env.get("GITHUB_REPOSITORY", "")
     require(re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository), "Invalid controller repository.")
     require(number(env.get("GITHUB_RUN_ATTEMPT"), "controller attempt") == 1,
@@ -33,11 +34,13 @@ def identity(env):
 
 
 def save(state_dir, state):
+    """Write the controller state that the final job will restore from its artifact."""
     state_dir.mkdir(parents=True, exist_ok=True)
     (state_dir / "state.json").write_text(json.dumps(state, sort_keys=True) + "\n")
 
 
 def outputs(env, **values):
+    """Append single-line values to the Actions step output file for downstream jobs."""
     if env.get("GITHUB_OUTPUT"):
         with open(env["GITHUB_OUTPUT"], "a") as stream:
             for key, value in values.items():
@@ -47,14 +50,17 @@ def outputs(env, **values):
 
 
 def run_url(state):
+    """Build the link from a required commit status to the controller run that owns it."""
     return f"https://github.com/{state['repository']}/actions/runs/{state['controller_run_id']}"
 
 
 def status_marker(state):
+    """Build the status description prefix that identifies the originating collection run."""
     return f"Telemetry source {state['source_run_id']}: "
 
 
 def latest_status(api, prefix, state):
+    """Find the newest telemetry status on the collected PR head, or return None if none exists."""
     # The combined-status endpoint omits creator. The history endpoint includes
     # it and returns newest first, so stop at the first matching context.
     head = state["source_head_sha"]
@@ -71,6 +77,7 @@ def latest_status(api, prefix, state):
 
 
 def status_identity(api, prefix, state):
+    """Require the latest status on this head to belong to this bot and controller run."""
     latest = latest_status(api, prefix, state)
     require(latest is not None and latest.get("target_url") == run_url(state)
             and latest.get("description", "").startswith(status_marker(state))
@@ -81,6 +88,7 @@ def status_identity(api, prefix, state):
 
 
 def post_status(api, prefix, state, conclusion, summary):
+    """Write the required status on the collected PR head and link it to this controller run."""
     description = status_marker(state) + " ".join(summary.splitlines())
     return api.post(f"{prefix}/statuses/{state['source_head_sha']}", {
         "context": STATUS_CONTEXT, "state": conclusion, "target_url": run_url(state),
@@ -89,6 +97,7 @@ def post_status(api, prefix, state, conclusion, summary):
 
 
 def start_status(api, prefix, state):
+    """Set the PR head to pending unless its latest telemetry status is newer or unrecognized."""
     latest = latest_status(api, prefix, state)
     if latest is not None:
         source = re.match(r"Telemetry source ([0-9]+): ", latest.get("description", ""))
@@ -103,6 +112,7 @@ def start_status(api, prefix, state):
 
 
 def conclude(api, prefix, state, conclusion, summary):
+    """Append the result only while this controller still owns the latest telemetry status."""
     # Commit statuses are append-only: refuse to supersede another controller's
     # latest result rather than accidentally turning its newer candidate green.
     status_identity(api, prefix, state)
@@ -110,6 +120,7 @@ def conclude(api, prefix, state, conclusion, summary):
 
 
 def source_run(api, prefix, source_id, repository):
+    """Fetch the collection run and verify its repository, run ID, and head SHA format."""
     source = api.get(f"{prefix}/actions/runs/{source_id}")
     require(source.get("id") == source_id and source.get("repository", {}).get("full_name") == repository,
             "Collection run belongs to another repository.")
@@ -118,6 +129,7 @@ def source_run(api, prefix, source_id, repository):
 
 
 def validate_source(source):
+    """Require a successful first attempt of the expected pull request collection workflow."""
     require(source.get("event") == "pull_request" and source.get("path") == WORKFLOW
             and source.get("name") == "Telemetry contract", "Unexpected collection workflow or event.")
     require(source.get("run_attempt") == 1, "Collection reruns are not supported.")
@@ -126,6 +138,10 @@ def validate_source(source):
 
 
 def read_artifact(api, prefix, source, state_dir):
+    """Download the run's report and copy its required files into the controller's state directory.
+
+    Check the artifact's identity, size, and contents before copying any files.
+    """
     listing = api.get(f"{prefix}/actions/runs/{source['id']}/artifacts?per_page=100")
     expected = f"telemetry-report-{source['id']}-1"
     matches = [item for item in listing.get("artifacts", []) if item.get("name") == expected]
@@ -154,6 +170,11 @@ def read_artifact(api, prefix, source, state_dir):
 
 
 def validate_context(api, prefix, state, state_dir, source):
+    """Return the manifest and delta after matching the collected evidence to the live PR.
+
+    Match the source repository, merge parents, and report hashes. For a multi-check
+    report, also verify the collector workflow matches the version on the target branch.
+    """
     raw = json.loads((state_dir / "manifest.json").read_bytes())
     pr_number = number(raw.get("pr"), "PR number")
     live = api.get(f"{prefix}/pulls/{pr_number}")
@@ -194,6 +215,7 @@ def validate_context(api, prefix, state, state_dir, source):
 
 
 def own_comment(comment, manifest, state):
+    """Return whether this bot comment carries both the report marker and the controller run link."""
     return (comment.get("user", {}).get("type") == "Bot"
             and comment.get("user", {}).get("login") == "github-actions[bot]"
             and comment.get("body", "").startswith(comment_marker(manifest) + "\n")
@@ -201,6 +223,7 @@ def own_comment(comment, manifest, state):
 
 
 def publish(api, prefix, state, manifest, delta):
+    """Render the findings and create or refresh the bot comment for this report and controller."""
     body = render_comment(review_manifest(manifest, state), delta, "reusing" if state.get("reused_approval") else "pending")
     for page in range(1, 11):
         comments = api.get(f"{prefix}/issues/{manifest['pr']}/comments?per_page=100&page={page}")
@@ -215,6 +238,7 @@ def publish(api, prefix, state, manifest, delta):
 
 
 def update_comment(api, prefix, state, manifest, delta, status):
+    """Refresh the recorded comment after checking that it still belongs to this report and run."""
     if not state.get("comment_id"):
         return
     comment = api.get(f"{prefix}/issues/comments/{state['comment_id']}")
@@ -223,6 +247,7 @@ def update_comment(api, prefix, state, manifest, delta, status):
 
 
 def review_manifest(manifest, state):
+    """Copy the manifest for display and include the original approval run when approval is reused."""
     result = dict(manifest)
     if state.get("reused_approval"):
         result["reused_approval_run_id"] = state["reused_approval"]["run_id"]
@@ -230,6 +255,11 @@ def review_manifest(manifest, state):
 
 
 def prepare(source_id, state_dir, env, api):
+    """Validate and publish the collected findings, then tell Actions whether to wait for review.
+
+    Start a pending status on the PR head and save the evidence needed by the final job.
+    For Environment review, look for a matching human approval before requesting another.
+    """
     state_dir = Path(state_dir)
     state = identity(env)
     state.update(source_run_id=number(source_id, "source run"), validated=False)
@@ -278,6 +308,12 @@ def prepare(source_id, state_dir, env, api):
 
 
 def finish(state_dir, publish_result, approval_result, env, api):
+    """Recheck the report and decision after publication, then write the required commit status.
+
+    For Environment review, verify the posted findings and either the current run's
+    human approval or the original approval selected for reuse. Other methods check
+    their own decision evidence and can leave the status pending.
+    """
     state_dir = Path(state_dir)
     state = json.loads((state_dir / "state.json").read_bytes())
     expected = identity(env)
@@ -363,6 +399,7 @@ def fail(source_id, status_id, env, api):
 
 
 def main():
+    """Run the requested workflow phase and return a failing exit code if validation blocks it."""
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
     prepare_parser = commands.add_parser("prepare")

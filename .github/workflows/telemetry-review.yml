@@ -1,5 +1,7 @@
 name: Negative tests - telemetry review
 
+# A completed collector run supplies the evidence. The default branch supplies
+# the workflow that will evaluate it with permission to update the PR.
 on:
   workflow_run:
     workflows: [Telemetry contract]
@@ -13,6 +15,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Validate the artifact and candidate before publishing any findings.
   publish:
     name: Post telemetry diff on the PR
     runs-on: ubuntu-latest
@@ -27,6 +30,7 @@ jobs:
       status_id: ${{ steps.publish.outputs.status_id }}
       pr: ${{ steps.publish.outputs.pr }}
       has_changes: ${{ steps.publish.outputs.has_changes }}
+      # Findings may already have a valid human approval for this exact effect.
       needs_review: ${{ steps.publish.outputs.needs_review }}
       state_artifact: ${{ steps.publish.outputs.state_artifact }}
       comment_url: ${{ steps.publish.outputs.comment_url }}
@@ -51,6 +55,7 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+  # GitHub's Environment records the human decision before this job gets a runner.
   review:
     name: Approve or reject the PR telemetry diff
     needs: publish
@@ -64,6 +69,8 @@ jobs:
       - name: Continue after native GitHub review
         run: echo 'Review completed. The final check validates the approver and current PR.'
 
+  # Run even if review was skipped or rejected. The controller checks the live
+  # candidate and decision before writing the required status on the PR head.
   final:
     name: Finalize telemetry review
     concurrency:
