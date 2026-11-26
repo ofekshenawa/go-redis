@@ -5,7 +5,9 @@ on:
     paths:
       - '.github/workflows/negative-test-infrastructure.yml'
       - '.github/workflows/telemetry-review.yml'
+      - '.github/workflows/negative-checkbox-*.yml'
       - 'tools/telemetry-contract/*.py'
+      - 'tools/negative-checkbox/*.py'
 
 permissions:
   contents: read
@@ -20,4 +22,6 @@ jobs:
         with:
           persist-credentials: false
       - working-directory: tools/telemetry-contract
+        run: python3 -m unittest discover -p 'test_*.py'
+      - working-directory: tools/negative-checkbox
         run: python3 -m unittest discover -p 'test_*.py'
