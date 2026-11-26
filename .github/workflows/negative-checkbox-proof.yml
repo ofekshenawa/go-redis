@@ -1,0 +1,49 @@
+name: Checkbox edit preflight
+on:
+  push:
+    branches: [telemetry-demo/base]
+    paths: [.github/workflows/negative-checkbox-proof.yml]
+  issue_comment:
+    types: [edited]
+permissions: {}
+jobs:
+  publish:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - name: Post neutral task on the installation PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api repos/ofekshenawa/go-redis/issues/33/comments -f body='<!-- negative-checkbox-preflight-33 -->
+          **Checkbox input test**
+
+          - [ ] Record a test click in GitHub Actions
+
+          This neutral task records who edited the comment. It has no effect on merge status.'
+  observe:
+    if: >-
+      github.event_name == 'issue_comment' && github.event.issue.pull_request &&
+      github.event.issue.number == 33 && github.event.comment.user.login == 'github-actions[bot]' &&
+      github.event.sender.type == 'User' && startsWith(github.event.comment.body, '<!-- negative-checkbox-preflight-33 -->')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify the GitHub event and exact task transition
+        run: |
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          event = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_bytes())
+          before = event["changes"]["body"]["from"].replace("\r\n", "\n")
+          after = event["comment"]["body"].replace("\r\n", "\n")
+          assert before.count("- [ ] Record a test click") == 1
+          assert after == before.replace("- [ ] Record a test click", "- [x] Record a test click", 1)
+          observed = dict(event="issue_comment", action=event["action"], editor=event["sender"]["login"],
+                          author=event["comment"]["user"]["login"], comment_id=event["comment"]["id"],
+                          edited_at=event["comment"]["updated_at"])
+          print(json.dumps(observed))
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as out:
+              out.write("Neutral checkbox event\n\n```json\n" + json.dumps(observed, indent=2) + "\n```\n")
+          PY
