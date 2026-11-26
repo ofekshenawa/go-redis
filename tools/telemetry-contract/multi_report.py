@@ -5,6 +5,12 @@ from pathlib import Path
 
 
 def collect_rows(report, api_file, otel_outcome, api_outcome):
+    """Write the combined check results and a Markdown summary in report.
+
+    The OTel delta and apidiff output supply the findings. The workflow step
+    outcomes distinguish successful checks with no findings from checks that
+    failed to collect data. A failed check gets an error row and blocks review.
+    """
     rows = []
     for name, outcome in (("OTel", otel_outcome), ("Public API", api_outcome)):
         if outcome != "success":

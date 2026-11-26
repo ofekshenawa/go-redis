@@ -65,6 +65,8 @@ type graph struct {
 	errors          []string
 }
 
+// newGraph indexes functions in the root package and its go-redis and semantic
+// convention dependencies so helper calls can be traced to their declarations.
 func newGraph(p *packages.Package) *graph {
 	g := &graph{root: p, objects: map[types.Object]*node{}, exprs: map[ast.Expr]*node{}, funcs: map[*types.Func]*function{}, builtGlobals: map[*packages.Package]bool{}, active: map[*ast.FuncDecl]bool{}, used: map[*types.Func]bool{}, imported: map[types.Object]bool{}}
 	packages.Visit([]*packages.Package{p}, nil, func(q *packages.Package) {
@@ -83,6 +85,8 @@ func newGraph(p *packages.Package) *graph {
 	})
 	return g
 }
+
+// new allocates a graph node and seeds it with any already-known values.
 func (g *graph) new(values ...string) *node {
 	n := &node{values: map[string]bool{}}
 	for _, s := range values {
@@ -91,6 +95,9 @@ func (g *graph) new(values ...string) *node {
 	g.nodes = append(g.nodes, n)
 	return n
 }
+
+// add records a possible value and reports whether the node changed.
+// When a node accumulates too many values, new string literals widen to an unknown string.
 func (n *node) add(s string) bool {
 	if strings.HasPrefix(s, "s:") {
 		if n.values["?:string"] {
@@ -106,11 +113,16 @@ func (n *node) add(s string) bool {
 	n.values[s] = true
 	return true
 }
+
+// edge connects two nodes so propagation can copy possible values from source to destination.
 func (g *graph) edge(from, to *node) {
 	if from != nil && to != nil && from != to {
 		from.edges = append(from.edges, to)
 	}
 }
+
+// obj returns the node for a Go declaration, seeding string constants immediately.
+// Local variables belong to the current function frame. Fields are shared across frames.
 func (g *graph) obj(o types.Object) *node {
 	if o == nil {
 		return g.new()
@@ -129,9 +141,14 @@ func (g *graph) obj(o types.Object) *node {
 	}
 	return n
 }
+
+// fail saves the file and line of an unsupported construct for the scanner's diagnostics.
 func (g *graph) fail(p *packages.Package, n ast.Node, msg string) {
 	g.errors = append(g.errors, p.Fset.Position(n.Pos()).String()+": "+msg)
 }
+
+// build inspects package initializers and root function bodies, including functions
+// with no callers. Calls to telemetry helpers can be analyzed with their arguments.
 func (g *graph) build() error {
 	g.globals(g.root)
 	for _, file := range g.root.Syntax {
@@ -151,6 +168,9 @@ func (g *graph) build() error {
 	}
 	return g.err()
 }
+
+// telemetrySignature identifies functions whose type mentions OTel attributes or
+// metrics so the scanner can trace each call's arguments separately.
 func telemetrySignature(f *types.Func) bool {
 	if f == nil {
 		return false
@@ -158,6 +178,8 @@ func telemetrySignature(f *types.Func) bool {
 	s := typeName(f.Type())
 	return strings.Contains(s, otel+"attribute.") || strings.Contains(s, otel+"metric.")
 }
+
+// err combines all unsupported-source diagnostics in stable order, or returns nil.
 func (g *graph) err() error {
 	if len(g.errors) == 0 {
 		return nil
@@ -165,6 +187,8 @@ func (g *graph) err() error {
 	sort.Strings(g.errors)
 	return fmt.Errorf("unsupported telemetry source:\n%s", strings.Join(g.errors, "\n"))
 }
+
+// globals scans initializers in the root package once, outside any function frame.
 func (g *graph) globals(p *packages.Package) {
 	if g.builtGlobals[p] {
 		return
@@ -188,6 +212,9 @@ func (g *graph) globals(p *packages.Package) {
 		}
 	}
 }
+
+// valueSpec connects the values in a declaration to its named variables,
+// including individual results from a single multi-value call.
 func (g *graph) valueSpec(p *packages.Package, v *ast.ValueSpec) {
 	for i, e := range v.Values {
 		val := g.expr(p, e)
@@ -204,6 +231,9 @@ func (g *graph) valueSpec(p *packages.Package, v *ast.ValueSpec) {
 		}
 	}
 }
+
+// buildFunc analyzes one function in its own frame and records the nodes used
+// for its parameters and returns. Exported functions can receive caller-defined dimensions.
 func (g *graph) buildFunc(f *function) {
 	if f == nil || f.built {
 		return
@@ -240,6 +270,9 @@ func (g *graph) buildFunc(f *function) {
 		g.walk(f.pkg, f.decl.Body, f.returns)
 	}
 }
+
+// walk records how values move through assignments, returns and loops in a
+// function body. It visits every branch, including code with no runtime test coverage.
 func (g *graph) walk(p *packages.Package, n ast.Node, returns []*node) {
 	ast.Inspect(n, func(n ast.Node) bool {
 		switch v := n.(type) {
@@ -291,6 +324,9 @@ func (g *graph) walk(p *packages.Package, n ast.Node, returns []*node) {
 		return true
 	})
 }
+
+// called resolves a named function or method call to its Go declaration.
+// Indirect calls and built-ins can have no function object.
 func called(p *packages.Package, c *ast.CallExpr) *types.Func {
 	switch f := c.Fun.(type) {
 	case *ast.Ident:
@@ -302,18 +338,27 @@ func called(p *packages.Package, c *ast.CallExpr) *types.Func {
 	}
 	return nil
 }
+
+// pkgName returns a function's import path, which distinguishes SDK methods
+// from client helpers that happen to share their names.
 func pkgName(f *types.Func) string {
 	if f == nil || f.Pkg() == nil {
 		return ""
 	}
 	return f.Pkg().Path()
 }
+
+// typeName renders Go types using full import paths so package aliases do not
+// affect how the scanner recognizes telemetry APIs.
 func typeName(t types.Type) string {
 	if t == nil {
 		return ""
 	}
 	return types.TypeString(t, func(p *types.Package) string { return p.Path() })
 }
+
+// isStringMap recognizes map[string]string declarations whose keys can supply
+// metric labels.
 func isStringMap(t types.Type) bool {
 	if t == nil {
 		return false
@@ -321,7 +366,12 @@ func isStringMap(t types.Type) bool {
 	m, ok := t.Underlying().(*types.Map)
 	return ok && typeName(m.Key()) == "string" && typeName(m.Elem()) == "string"
 }
+
+// isAttribute checks whether the rendered type refers to the OTel attribute package.
 func isAttribute(t types.Type) bool { return strings.Contains(typeName(t), otel+"attribute.") }
+
+// expr builds and caches a node for an expression in the current frame.
+// Its edges and deferred operations describe which telemetry values can reach it.
 func (g *graph) expr(p *packages.Package, e ast.Expr) *node {
 	if e == nil {
 		return g.new()
@@ -473,6 +523,7 @@ func (g *graph) expr(p *packages.Package, e ast.Expr) *node {
 
 var instrumentNames = map[string]bool{}
 
+// init lists the numeric OTel instrument constructors recognized by the scanner.
 func init() {
 	for _, number := range []string{"Int64", "Float64"} {
 		for _, kind := range []string{"Counter", "UpDownCounter", "Histogram", "Gauge", "ObservableCounter", "ObservableUpDownCounter", "ObservableGauge"} {
@@ -480,6 +531,10 @@ func init() {
 		}
 	}
 }
+
+// call models how a call contributes telemetry data. Constructors create
+// registrations, recording calls capture handles and attributes, and recognized
+// helpers connect arguments and results across function boundaries.
 func (g *graph) call(p *packages.Package, c *ast.CallExpr, out *node) {
 	args := make([]*node, len(c.Args))
 	for i, e := range c.Args {
@@ -737,6 +792,8 @@ func (g *graph) call(p *packages.Package, c *ast.CallExpr, out *node) {
 		g.fail(p, c, "external telemetry helper requires an adapter: "+path+"."+name)
 	}
 }
+
+// stringsOf returns a node's known string literals in sorted order.
 func stringsOf(n *node) []string {
 	var s []string
 	if n != nil {
@@ -749,6 +806,9 @@ func stringsOf(n *node) []string {
 	sort.Strings(s)
 	return s
 }
+
+// propagate moves possible values across edges and evaluates derived values
+// until the graph stops changing. It returns an error if analysis exceeds its limits.
 func (g *graph) propagate() error {
 	for round := 0; round < 1000; round++ {
 		changed := false
@@ -771,6 +831,9 @@ func (g *graph) propagate() error {
 	}
 	return fmt.Errorf("static telemetry analysis did not converge")
 }
+
+// solve resolves names, units and attribute keys, then propagates the resulting
+// metric identities to the handles used at recording sites.
 func (g *graph) solve() error {
 	if err := g.err(); err != nil {
 		return err
@@ -824,6 +887,9 @@ func (g *graph) solve() error {
 	}
 	return g.propagate()
 }
+
+// contract builds the package's metric definitions and attribute inventory from
+// the solved graph. Each recording contributes keys to the metrics its handle can reach.
 func (g *graph) contract() ([]Metric, []Attribute, error) {
 	metrics := map[string]*Metric{}
 	allAttrs := map[Attribute]bool{}
@@ -906,7 +972,8 @@ func (g *graph) contract() ([]Metric, []Attribute, error) {
 	return result, attrs, g.err()
 }
 
-// Resolve only the referenced imported value, not every enum in the SDK.
+// importValue scans the initializer for one referenced declaration in an
+// imported package so its value can flow into the calling package.
 func (g *graph) importValue(p *packages.Package, o types.Object) {
 	if g.imported[o] {
 		return

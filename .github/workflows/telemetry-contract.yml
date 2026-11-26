@@ -7,9 +7,11 @@ on:
     branches-ignore: [negative-tests/infrastructure]
     types: [opened, synchronize, reopened, edited]
 
+# This workflow collects evidence. The separate review workflow writes the PR status.
 permissions:
   contents: read
 
+# A newer PR event supersedes an in-progress collection for the same PR.
 concurrency:
   group: telemetry-contract-${{ github.event.pull_request.number }}
   cancel-in-progress: true
@@ -30,6 +32,8 @@ jobs:
             echo '::error::Re-runs are not supported. Push a new commit or reopen the PR for a fresh report and approval.'
             exit 1
           fi
+      # Use the merge and base commits selected for this event throughout collection.
+      # Fetch the merge parents so the report builder can verify the candidate later.
       - name: Check out the fixed merge candidate
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -48,12 +52,15 @@ jobs:
         with:
           go-version-file: base/tools/telemetry-contract/go.mod
           cache: false
+      # Build once from the target revision and use that binary to scan both trees.
       - name: Test and build the trusted collector
         working-directory: base/tools/telemetry-contract
         run: |
           go test ./...
           python3 -m unittest discover -v -p 'test_*.py'
           go build -o "$RUNNER_TEMP/telemetry-contract" .
+      # Keep both step outcomes so the combined report can distinguish findings
+      # that need review from collection failures that must block the check.
       - name: Extract and compare OTel contracts
         id: otel
         continue-on-error: true
@@ -73,9 +80,12 @@ jobs:
           OTEL_OUTCOME: ${{ steps.otel.outcome }}
           API_OUTCOME: ${{ steps.api.outcome }}
         run: python3 base/tools/telemetry-contract/multi_report.py report "$RUNNER_TEMP/api.txt" "$OTEL_OUTCOME" "$API_OUTCOME"
+      # OTel-only runs do not produce a combined report with an error row.
       - name: Fail on a legacy collector error
         if: steps.api.outcome == 'skipped' && steps.otel.outcome != 'success'
         run: exit 1
+      # Hash the finished report before handing its files and commit identities
+      # to the trusted publisher in the artifact for this run.
       - name: Bind the report to this exact PR candidate
         run: python3 base/tools/telemetry-contract/prepare.py base candidate report
       - name: Save contracts, diff and exact candidate identity

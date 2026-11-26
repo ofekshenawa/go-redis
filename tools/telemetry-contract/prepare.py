@@ -9,6 +9,12 @@ import sys
 
 
 def prepare(base, candidate, report):
+    """Bind the finished report to this collection run and its proposed merge.
+
+    Check the candidate's parents and the base checkout against the PR event.
+    Save the commit identities and report hashes in manifest.json for the
+    trusted publisher, and append a human-readable summary to the workflow run.
+    """
     event = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text())
     pr = event["pull_request"]
     if os.environ["GITHUB_RUN_ATTEMPT"] != "1":

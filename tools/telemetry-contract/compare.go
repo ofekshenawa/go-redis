@@ -26,10 +26,14 @@ type Change struct {
 	After    any    `json:"after"`
 }
 
+// jsonBytes formats a value for the report artifact, including its final newline.
 func jsonBytes(value any) ([]byte, error) {
 	data, err := json.MarshalIndent(value, "", "  ")
 	return append(data, '\n'), err
 }
+
+// readContract reads a single inventory from disk, validates its fields, and
+// sorts it for comparison. A malformed inventory stops collection.
 func readContract(path string) (Contract, error) {
 	var c Contract
 	file, err := os.Open(path)
@@ -75,6 +79,9 @@ func readContract(path string) (Contract, error) {
 	}
 	return c, nil
 }
+
+// normalizeContract checks the inventory version, metric identities, and
+// attributes, then sorts them in place so source order cannot change the diff.
 func normalizeContract(c *Contract) error {
 	if c.Version != 1 {
 		return fmt.Errorf("unsupported contract version %d", c.Version)
@@ -118,6 +125,8 @@ func normalizeContract(c *Contract) error {
 	sort.Slice(c.Metrics, func(i, j int) bool { return metricKey(c.Metrics[i]) < metricKey(c.Metrics[j]) })
 	return nil
 }
+
+// validateAttrs checks names and supported types and rejects duplicate name/type pairs.
 func validateAttrs(attrs []Attribute) error {
 	validTypes := map[string]bool{"string": true, "int64": true, "float64": true, "bool": true, "string[]": true, "int64[]": true, "float64[]": true, "bool[]": true}
 	seen := map[Attribute]bool{}
@@ -132,9 +141,17 @@ func validateAttrs(attrs []Attribute) error {
 	}
 	return nil
 }
+
+// metricKey identifies a metric by package, name, instrument, and unit. A change
+// to one of these fields appears as a removal and an addition in the report.
 func metricKey(m Metric) string {
 	return strings.Join([]string{m.Package, m.Name, m.Instrument, m.Unit}, "\x00")
 }
+
+// compareContracts compares the normalized target and proposed-merge inventories.
+// It returns a sorted list of metric and attribute-declaration changes plus a
+// Markdown summary. For a matching metric identity, changed attributes produce
+// one modification with the complete before and after values.
 func compareContracts(before, after Contract) (Delta, []byte) {
 	delta := Delta{Version: 1, Changes: []Change{}}
 	oldMetrics, newMetrics := map[string]Metric{}, map[string]Metric{}
@@ -182,9 +199,8 @@ func compareContracts(before, after Contract) (Delta, []byte) {
 	return delta, summaryReport(delta)
 }
 
-// The trusted PR presenter owns the detailed colored diff. Keep the collection
-// summary small and independent of PR-controlled strings; delta.json retains
-// every before/after value for both review and offline inspection.
+// summaryReport produces the collector's Markdown counts. The trusted publisher
+// renders the detailed diff from the before and after values in delta.json.
 func summaryReport(delta Delta) []byte {
 	if !delta.HasChanges {
 		return []byte("# Telemetry contract unchanged\n\nNo telemetry contract changes.\n")
